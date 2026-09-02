@@ -143,23 +143,23 @@ describe('web-app runtime glue', () => {
       lanAddresses: ['192.168.1.5'],
       trustedHosts: ['192.168.1.5', 'lab.internal'],
     })
-    expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token (LAN: http://192.168.1.5:4567/?token=test-token)')
+    expect(log).toHaveBeenCalledWith('dsh web: http://localhost:4567/?token=test-token (LAN: http://192.168.1.5:4567/?token=test-token)')
     expect(log).toHaveBeenCalledWith('dsh web: opening the default browser; pass --no-open to disable')
-    expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:4567/?token=test-token')
+    expect(openBrowser).toHaveBeenCalledWith('http://localhost:4567/?token=test-token')
     expect(lifecycle).toEqual([
-      'dsh web: http://127.0.0.1:4567/?token=test-token (LAN: http://192.168.1.5:4567/?token=test-token)',
+      'dsh web: http://localhost:4567/?token=test-token (LAN: http://192.168.1.5:4567/?token=test-token)',
       'dsh web: opening the default browser; pass --no-open to disable',
-      'open:http://127.0.0.1:4567/?token=test-token',
+      'open:http://localhost:4567/?token=test-token',
     ])
     const assembly = await ctx.systemPrompt.assemble()
     expect(assembly.sections.find(entry => entry.name === 'harness:source')?.text).toContain('DeepSeek Harness implementation checkout')
     const section = assembly.sections.find(entry => entry.name === 'app:web-surface')
-    expect(section?.text).toContain('http://127.0.0.1:4567')
+    expect(section?.text).toContain('http://localhost:4567')
     // The single update contract: the receiver is always on; no-refresh
     // reloads additionally need the rebuild watcher.
     expect(section?.text).toContain('pnpm run dev:web')
     const webRuntime = contributions.find(contribution => contribution.name === 'web-runtime')
-    expect(webRuntime?.resolve()).toEqual({ DSH_WEB_URL: 'http://127.0.0.1:4567' })
+    expect(webRuntime?.resolve()).toEqual({ DSH_WEB_URL: 'http://localhost:4567' })
     await ctx.fiber.dispose()
   })
 
@@ -212,7 +212,7 @@ describe('web-app runtime glue', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: true, trustedHosts: [] }))
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
+    expect(log).toHaveBeenCalledWith('dsh web: http://localhost:4567/?token=test-token')
     await ctx.fiber.dispose()
   })
 
@@ -248,7 +248,7 @@ describe('web-app runtime glue', () => {
     internals.openBrowser = openBrowser
     apply(ctx, new Config({ openBrowser: true, printUrl: true, surfaceContext: false, trustedHosts: [] }))
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
+    expect(log).toHaveBeenCalledWith('dsh web: http://localhost:4567/?token=test-token')
     expect(openBrowser).not.toHaveBeenCalled()
     await ctx.fiber.dispose()
   })
@@ -272,8 +272,8 @@ describe('web-app runtime glue', () => {
     expect(openBrowser).not.toHaveBeenCalled()
     release!()
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
-    expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:4567/?token=test-token')
+    expect(log).toHaveBeenCalledWith('dsh web: http://localhost:4567/?token=test-token')
+    expect(openBrowser).toHaveBeenCalledWith('http://localhost:4567/?token=test-token')
     await settled.fiber.dispose()
 
     // Failed path: Loader reports the sibling failure; the app prints no URL
@@ -363,13 +363,13 @@ describe('web-app runtime glue', () => {
     vi.stubEnv('DSH_HOME', '/must-not-reach-browser')
     const completed = launcher()
     vi.mocked(spawn).mockReturnValueOnce(completed)
-    const completion = originalOpenBrowser('http://127.0.0.1:4567')
+    const completion = originalOpenBrowser('http://localhost:4567')
     const [command, args, options] = vi.mocked(spawn).mock.calls[0]!
     expect(command).toBe(process.execPath)
     expect(args).toEqual([
       '--input-type=module',
       '--eval', expect.stringContaining('await import('),
-      '--', 'http://127.0.0.1:4567',
+      '--', 'http://localhost:4567',
     ])
     expect(args?.[2]).toContain("if (process.platform === 'win32')")
     expect(args?.[2]).toContain('launcher.ref()')
@@ -384,7 +384,7 @@ describe('web-app runtime glue', () => {
     const completedWithStderr = launcher()
     vi.mocked(spawn).mockReturnValueOnce(completedWithStderr)
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    const completionWithStderr = originalOpenBrowser('http://127.0.0.1:4567')
+    const completionWithStderr = originalOpenBrowser('http://localhost:4567')
     completedWithStderr.stderr?.write('launcher note\n')
     completedWithStderr.emit('close', 0)
     await expect(completionWithStderr).resolves.toBeUndefined()
@@ -392,7 +392,7 @@ describe('web-app runtime glue', () => {
 
     const failedWithReason = launcher()
     vi.mocked(spawn).mockReturnValueOnce(failedWithReason)
-    const reasonFailure = originalOpenBrowser('http://127.0.0.1:4567')
+    const reasonFailure = originalOpenBrowser('http://localhost:4567')
     const reasonAssertion = expect(reasonFailure).rejects.toThrow('desktop unavailable')
     failedWithReason.stderr?.write('Error: desktop unavailable\n    at fixture')
     failedWithReason.emit('close', 1)
@@ -400,7 +400,7 @@ describe('web-app runtime glue', () => {
 
     const failed = launcher()
     vi.mocked(spawn).mockReturnValueOnce(failed)
-    const failure = originalOpenBrowser('http://127.0.0.1:4567')
+    const failure = originalOpenBrowser('http://localhost:4567')
     const failureAssertion = expect(failure).rejects.toThrow('exited with code 3')
     await Promise.resolve()
     failed.emit('close', 3)
@@ -408,7 +408,7 @@ describe('web-app runtime glue', () => {
 
     const errored = launcher()
     vi.mocked(spawn).mockReturnValueOnce(errored)
-    const error = originalOpenBrowser('http://127.0.0.1:4567')
+    const error = originalOpenBrowser('http://localhost:4567')
     const errorAssertion = expect(error).rejects.toThrow('spawn failed')
     await Promise.resolve()
     errored.emit('error', new Error('spawn failed'))

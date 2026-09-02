@@ -14,7 +14,7 @@ Install Node.js 24, then run:
 npx acme-agent setup
 ```
 
-The command prints the setup URL, which is `http://127.0.0.1:3080` by default.
+The command prints the setup URL, which is `http://localhost:3080` by default.
 
 ## Community
 

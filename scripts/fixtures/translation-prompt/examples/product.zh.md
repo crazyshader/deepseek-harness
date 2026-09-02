@@ -14,7 +14,7 @@ Acme Agent 是一款开源 agent harness（智能体框架），用于自动化�
 npx acme-agent setup
 ```
 
-该命令会打印设置地址，默认地址为 `http://127.0.0.1:3080`。
+该命令会打印设置地址，默认地址为 `http://localhost:3080`。
 
 ## 社区
 
