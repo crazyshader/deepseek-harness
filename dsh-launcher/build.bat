@@ -1,49 +1,49 @@
 @echo off
-rem 双击打包 dsh-launcher.exe：自动找 Python、缺 PyInstaller 自动安装、
-rem 跑 build.py，成功后打开 dist 输出目录。窗口最后停住，便于看结果。
+rem Double-click to build dsh-launcher.exe: finds Python, installs PyInstaller if missing,
+rem runs build.py, then opens the dist folder. Window stays open for reading results.
 chcp 65001 >nul
 cd /d "%~dp0"
 
-echo === dsh-launcher 打包 ===
+echo === dsh-launcher build ===
 echo.
 
-rem --- 找 Python：优先 PATH 里的 python，回退到 py 启动器 ---
+rem --- Find Python: prefer PATH python, fall back to py launcher ---
 set "PY="
 where python >nul 2>nul && set "PY=python"
 if not defined PY (
     where py >nul 2>nul && set "PY=py -3"
 )
 if not defined PY (
-    echo [错误] 未找到 Python。请先安装 Python 3.9+，安装时勾选 "Add Python to PATH"。
+    echo [ERROR] Python not found. Install Python 3.9+ and check "Add Python to PATH".
     goto :fail
 )
-echo 使用 Python: %PY%
+echo Using Python: %PY%
 %PY% --version
 echo.
 
-rem --- PyInstaller 缺失时自动安装 ---
+rem --- Install PyInstaller if missing ---
 %PY% -c "import PyInstaller" >nul 2>nul
 if errorlevel 1 (
-    echo 未检测到 PyInstaller，正在安装...
+    echo PyInstaller not detected, installing...
     %PY% -m pip install pyinstaller
     if errorlevel 1 (
-        echo [错误] PyInstaller 安装失败。请检查网络后手动执行: %PY% -m pip install pyinstaller
+        echo [ERROR] PyInstaller install failed. Check network and run manually: %PY% -m pip install pyinstaller
         goto :fail
     )
 )
 
-rem --- 运行 build.py（它自带成功/失败判定，含产物被占用的检测）---
+rem --- Run build.py (it has its own success/failure detection, including file-lock check) ---
 %PY% build.py
 if errorlevel 1 goto :fail
 
 echo.
-echo 打包成功，打开输出目录...
+echo Build succeeded, opening output directory...
 explorer "dist"
 goto :done
 
 :fail
 echo.
-echo 打包失败，请查看上方错误信息。
+echo Build failed, see errors above.
 goto :done
 
 :done

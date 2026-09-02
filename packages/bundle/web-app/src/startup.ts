@@ -23,6 +23,8 @@ export const WEB_STARTUP_SERVICE = 'webStartup'
 export interface WebStartupValues {
   /** Whether this invocation opens the default browser after startup. */
   openBrowser: boolean
+  /** Whether this invocation disables browser token authentication. */
+  noAuth: boolean
   /** `--host`, absent when the invocation did not name one. */
   host?: string
   /** `--port`, absent when the invocation did not name one. */
@@ -33,6 +35,7 @@ export interface WebStartupValues {
 
 /** The web flag family, as commander parsed it. */
 interface WebOptions {
+  auth: boolean
   host?: string
   open: boolean
   port?: string
@@ -49,6 +52,7 @@ function webCommand(): Command {
     .description('Serve the DeepSeek Harness browser UI.')
     .helpOption('-h, --help', 'show this help')
     .option('--host <host>', 'bind host')
+    .option('--no-auth', 'disable browser token authentication (for trusted local environments)')
     .option('--no-open', 'do not open the Web UI in the default browser')
     .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
     .option('--trusted-host <authority...>', 'extra authority the /api browser-trust fence accepts (host or host:port; repeatable)')
@@ -77,8 +81,12 @@ export function apply(ctx: Context): void {
     if (options.port !== undefined && !/^\d+$/.test(options.port)) {
       program.error(`error: --port must be a number, got ${JSON.stringify(options.port)}`)
     }
+    if (!options.auth) {
+      console.log('⚠ --no-auth: browser token authentication is disabled')
+    }
     ctx.provide(WEB_STARTUP_SERVICE, {
       openBrowser: options.open,
+      noAuth: !options.auth,
       ...options.host !== undefined && { host: options.host },
       ...options.port !== undefined && { port: Number(options.port) },
       trustedHosts: options.trustedHost ?? [],

@@ -177,12 +177,32 @@ async function initializeSecret(credentials: CredentialProvider): Promise<Buffer
   return secret
 }
 
+/** Structural contract for the Host connection's browser-authentication layer. */
+export interface BrowserAuthenticator {
+  /** Verify the request carries a valid browser session. */
+  isAuthenticated(request: ConnectionTrustRequest): boolean
+  /** Authenticate an index request; return true only when the caller may serve index.html. */
+  authorizeIndex(req: ConnectionIndexRequest, res: ConnectionIndexResponse): boolean
+  /** Add this process's launch token to the ordinary application root URL. */
+  authenticatedUrl(baseUrl: string): string
+}
+
+/**
+ * No-op authenticator for `--no-auth` invocations: every request is admitted
+ * without token or cookie exchange. The Host/Origin trust fence is unaffected.
+ */
+export const NO_AUTH_BROWSER_AUTH: BrowserAuthenticator = {
+  isAuthenticated: () => true,
+  authorizeIndex: () => true,
+  authenticatedUrl: baseUrl => baseUrl,
+}
+
 /**
  * Process launch-token exchange and persistent signed-cookie verification.
  * Connection loads the credential provider's signing secret during activation
  * and retains it for synchronous request authentication.
  */
-export class BrowserAuth {
+export class BrowserAuth implements BrowserAuthenticator {
   private readonly launchToken: string
   private readonly maxAgeMilliseconds: number
 

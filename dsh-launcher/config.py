@@ -37,6 +37,7 @@ class LauncherConfig:
     project_root: str = ""
     port: int = DEFAULT_PORT
     open_web_after_start: bool = True
+    no_auth: bool = False
 
     @staticmethod
     def load() -> "LauncherConfig":
@@ -53,6 +54,7 @@ class LauncherConfig:
             project_root=str(data.get("project_root", "")),
             port=int(data.get("port", DEFAULT_PORT)),
             open_web_after_start=bool(data.get("open_web_after_start", True)),
+            no_auth=bool(data.get("no_auth", False)),
         )
 
     def save(self) -> None:

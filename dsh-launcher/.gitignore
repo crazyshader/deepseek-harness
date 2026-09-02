@@ -1,0 +1,8 @@
+# PyInstaller intermediate build dir (build.py scratch space)
+build/
+# PyInstaller output (dsh-launcher.exe)
+dist/
+
+# Python bytecode
+__pycache__/
+*.pyc

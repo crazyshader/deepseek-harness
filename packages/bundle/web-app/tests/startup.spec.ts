@@ -56,6 +56,7 @@ export const apply = ctx => globalThis.__webStartupApply(ctx)
     `  inject: [${WEB_STARTUP_SERVICE}]`,
     '  config:',
     "    host: !!js ctx.webStartup.host ?? '127.0.0.1'",
+    '    noAuth: !!js ctx.webStartup.noAuth',
     '    openBrowser: !!js ctx.webStartup.openBrowser',
     '    port: !!js ctx.webStartup.port ?? 3080',
     '    trustedHosts: !!js ctx.webStartup.trustedHosts',
@@ -97,6 +98,7 @@ describe('web command-line provider', () => {
     ])
     expect(values).toEqual({
       host: '127.0.0.1',
+      noAuth: false,
       openBrowser: false,
       port: 8080,
       trustedHosts: ['lab.internal', 'lab-2.internal', '10.0.0.9'],
@@ -107,9 +109,10 @@ describe('web command-line provider', () => {
 
   it('leaves deployment values to each consumer when flags omit them', async () => {
     const { values, observed } = await bootProvider([])
-    expect(values).toEqual({ openBrowser: true, trustedHosts: [] })
+    expect(values).toEqual({ noAuth: false, openBrowser: true, trustedHosts: [] })
     expect(observed.readerConfig).toEqual({
       host: '127.0.0.1',
+      noAuth: false,
       openBrowser: true,
       port: 3080,
       trustedHosts: [],
@@ -140,5 +143,11 @@ describe('web command-line provider', () => {
     expect(values).toBeUndefined()
     expect(observed.readerConfig).toBeUndefined()
     expect(observed.exits).toEqual([1])
+  })
+
+  it('publishes noAuth: true when --no-auth is passed', async () => {
+    const { values, observed } = await bootProvider(['--no-auth'])
+    expect(values).toEqual({ noAuth: true, openBrowser: true, trustedHosts: [] })
+    expect(observed.exits).toEqual([])
   })
 })

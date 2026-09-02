@@ -147,6 +147,11 @@ class LauncherWindow(QMainWindow):
         self.open_web_check.toggled.connect(self._on_open_web_toggled)
         ctrl_row.addWidget(self.open_web_check)
 
+        self.no_auth_check = QCheckBox("免 token 认证")
+        self.no_auth_check.setChecked(self.config.no_auth)
+        self.no_auth_check.toggled.connect(self._on_no_auth_toggled)
+        ctrl_row.addWidget(self.no_auth_check)
+
         root.addLayout(ctrl_row)
 
         # 日志区
@@ -251,6 +256,10 @@ class LauncherWindow(QMainWindow):
 
     def _on_open_web_toggled(self, checked: bool) -> None:
         self.config.open_web_after_start = checked
+        self.config.save()
+
+    def _on_no_auth_toggled(self, checked: bool) -> None:
+        self.config.no_auth = checked
         self.config.save()
 
     # ---- 前置检查（软提示）----
@@ -523,6 +532,8 @@ class LauncherWindow(QMainWindow):
         command = f"pnpm dsh web --port {port}"
         if not self.open_web_check.isChecked():
             command += " --no-open"
+        if self.no_auth_check.isChecked():
+            command += " --no-auth"
         return _Step(f"启动 Web 服务 (端口 {port})", "cmd", ["/c", command], root, service=True)
 
     def _on_ready_read(self) -> None:

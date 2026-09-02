@@ -3,7 +3,7 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import { BrowserAuth } from '../src/browser-auth.ts'
+import { BrowserAuth, NO_AUTH_BROWSER_AUTH } from '../src/browser-auth.ts'
 import type { ConnectionIndexRequest, ConnectionIndexResponse } from '../src/rpc.ts'
 import { RecordCredentials } from './browser-credentials.ts'
 
@@ -246,5 +246,20 @@ describe('BrowserAuth', () => {
 
     await expect(createAuth(new RecordCredentials(), Number.MAX_SAFE_INTEGER))
       .rejects.toThrow(/safe timestamp range/u)
+  })
+})
+
+describe('NO_AUTH_BROWSER_AUTH', () => {
+  it('admits every request and leaves the application URL untouched without any secret', () => {
+    expect(NO_AUTH_BROWSER_AUTH.isAuthenticated({ headers: {} })).toBe(true)
+    expect(NO_AUTH_BROWSER_AUTH.isAuthenticated(request('/'))).toBe(true)
+
+    const index = response()
+    expect(NO_AUTH_BROWSER_AUTH.authorizeIndex(request('/'), index.value)).toBe(true)
+    expect(index.state).toEqual({})
+
+    for (const url of ['http://127.0.0.1:3080', 'http://harness.example:3080/x?a=1#frag']) {
+      expect(NO_AUTH_BROWSER_AUTH.authenticatedUrl(url)).toBe(url)
+    }
   })
 })

@@ -1,85 +1,87 @@
 # dsh-launcher
 
-DeepSeek Harness 的图形启动器。主窗口分两个页签：「控制」提供安装、构建、启动、停止四个操作并实时显示底层命令的日志输出；「插件」提供 web profile 的第三方插件安装/卸载，以及插件兼容性问题导致 DSH 无法启动时的恢复手段。功能与项目根的 `quick-start.bat` 对齐，用 PySide6 实现，可用 PyInstaller 打包成独立 exe。
+English | [中文](README.zh.md)
 
-## 功能
+The graphical launcher for DeepSeek Harness. The main window has two tabs: "Control" offers install, build, launch, and stop with live log output from the underlying commands; "Plugins" installs and uninstalls third-party plugins for the web profile, and provides recovery when a plugin compatibility issue prevents DSH from starting. Features align with the project-root `quick-start.bat`; implemented with PySide6 and packable to a standalone exe via PyInstaller.
 
-### 控制页签
+## Features
 
-| 按钮 | 执行的命令 |
+### Control tab
+
+| Button | Command run |
 |------|-----------|
-| 安装 | `pnpm install` |
-| 构建 | `pnpm run clean` 然后 `pnpm run build`（两步，任一步失败即中止） |
-| 启动 | `pnpm dsh web --port <port>`（常驻 Web 服务） |
-| 停止 | 杀掉整棵进程树（`taskkill /T /F`），释放端口 |
+| Install | `pnpm install` |
+| Build | `pnpm run clean` then `pnpm run build` (two steps; any failure aborts) |
+| Launch | `pnpm dsh web --port <port>` (resident web service) |
+| Stop | kills the whole process tree (`taskkill /T /F`), freeing the port |
 
-其他行为：
+Other behaviors:
 
-- **项目目录**：首次运行需选择 DeepSeek Harness 项目根目录，之后记住（配置存于 `%APPDATA%\dsh-launcher\config.json`）。
-- **端口**：可配置，默认 3080，与配置一起持久化。
-- **启动后打开 Web**：勾选时，服务就绪后自动打开 `http://localhost:<port>`。
-- **幂等启动**：启动前探测目标端口，若被占用（无论来源）先清理占用进程，避免端口冲突导致启动失败。
-- **单任务互斥**：同一时刻只允许一个任务运行，运行中其他操作按钮置灰（插件页签的按钮同样受此约束）。
-- **前置软提示**：缺少 `node_modules` 或未构建 Web 前端时给出提示，而非硬锁按钮。
-- **关闭窗口**：若仍有服务在跑，会提示是否停止后退出。
-- **密钥**：不处理 `DEEPSEEK_API_KEY`，继承项目根 `.env`。若未配置，dsh 自身会在日志中报错。
+- **Project directory**: must be chosen on first run (the DeepSeek Harness project root), then remembered (config at `%APPDATA%\dsh-launcher\config.json`).
+- **Port**: configurable, default 3080, persisted together with the config.
+- **Open Web after launch**: when checked, opens `http://localhost:<port>` once the service is ready.
+- **Idempotent launch**: probes the target port before launching; if it is in use (from any source), cleans up the occupying process first to avoid a port-conflict launch failure.
+- **Single-task mutual exclusion**: only one task runs at a time; while one is running, the other action buttons are disabled (the Plugin tab buttons are subject to the same constraint).
+- **Soft pre-checks**: warns (rather than hard-locking the buttons) when `node_modules` is missing or the web front-end is unbuilt.
+- **Closing the window**: if a service is still running, asks whether to stop it before exiting.
+- **Secrets**: does not handle `DEEPSEEK_API_KEY`; it inherits the project-root `.env`. If unset, dsh itself reports the error in the log.
 
-### 插件页签
+### Plugin tab
 
-管理对象固定为 `web` profile（`$DSH_HOME/profiles/web`，`DSH_HOME` 缺省 `~/.dsh`）。插件的安装/卸载走官方机制 `dsh plugin --profile web add|remove <spec>`（转发 pnpm 并维护 `dsh.profile.bundles` 层列表）；用户自有的 `cordis.patch.yml`（如 MCP servers）不受任何影响。
+The managed target is fixed to the `web` profile (`$DSH_HOME/profiles/web`, `DSH_HOME` defaulting to `~/.dsh`). Plugin install/uninstall goes through the official mechanism `dsh plugin --profile web add|remove <spec>` (forwards pnpm and maintains the `dsh.profile.bundles` layer list); the user-owned `cordis.patch.yml` (such as MCP servers) is unaffected.
 
-**安装**
+**Install**
 
-- 输入框接受任意 pnpm 依赖 spec：npm 包名（可带版本）、`github:owner/repo`（可带 `#commit`）、本地 `.tgz` 包、本地目录。
-- 「目录…」「包…」按钮选择本地插件源码目录或压缩包，回填绝对路径；选目录按 link 语义安装（源码改动重启即生效）。
-- 每次经启动器安装前自动拍摄**安装前快照**（见下），日志会记录快照名。
-- git 源首次安装若因 pnpm 构建授权（`allowBuilds`）失败，dsh 会在日志里给出修法，按提示改完 profile 的 `pnpm-workspace.yaml` 后重新点安装即可；启动器不自动代做这项授权。
+- The input box accepts any pnpm dependency spec: an npm package name (optionally versioned), `github:owner/repo` (optionally with `#commit`), a local `.tgz` package, or a local directory.
+- The "Directory…" and "Package…" buttons pick a local plugin source directory or archive and fill in the absolute path; picking a directory installs with link semantics (source changes take effect on restart).
+- Before every install through the launcher, a **pre-install snapshot** is taken automatically (below); the log records the snapshot name.
+- If a first install from a git source fails on pnpm build authorization (`allowBuilds`), dsh prints the fix in the log; after editing the profile's `pnpm-workspace.yaml` as instructed, click install again. The launcher does not perform this authorization automatically.
 
-**卸载**
+**Uninstall**
 
-- 列表展示已装的第三方插件（内置 `dsh-base`/`dsh-web-app` 不可卸载）。
-- 「卸载选中」只卸载不重启；「卸载选中并重试」「卸载最近并重试」卸载后自动重启 Web 服务（先停当前服务，再执行恢复链条）。
-- 卸载不拍快照；误卸载后用安装按钮重装（版本按包名重新解析）。
+- The list shows the installed third-party plugins (the built-in `dsh-base`/`dsh-web-app` cannot be uninstalled).
+- "Uninstall selected" only uninstalls without restarting; "Uninstall selected and retry" and "Uninstall latest and retry" restart the web service after uninstalling (stop the current service first, then run the recovery chain).
+- Uninstall takes no snapshot; after an accidental uninstall, reinstall with the install button (version re-resolved by package name).
 
-**安装前快照与回滚（故障恢复）**
+**Pre-install snapshots and rollback (fault recovery)**
 
-- 快照内容：profile 目录的 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 三个文件，存于 `$DSH_HOME/profiles/.dsh-plugin-snapshots/web/<时间戳>/`（profile 目录之外），每份附带「当时正在安装哪个插件」的记录；最多保留最近 5 份，超出删最旧。不拷 `node_modules`（还原后用 `pnpm install` 重建）。
-- 插件兼容性问题导致 DSH 无法启动、Web 打不开时，在插件页签手动执行恢复动作（启动器不做自动失败判定，由使用者判断）：
-  1. **卸载最近并重试**——卸载最近安装的第三方插件后重启；
-  2. **回滚到最新/选中并重试**——把 profile 的 manifest 文件还原到某份快照记录的状态（快照中未记录的文件会删除，完整回到安装前），然后在 profile 目录跑 `pnpm install` 重建依赖，用 `dsh --profile web --dump-config` 验证配置组合可加载，最后重启 Web 服务。
-- 恢复链条任一步失败即中止后续步骤（不会带病重启），全过程见日志。
-- 回滚链条的 `pnpm install` 一步需要网络（registry 依赖），离线时会停在该步。
-- 即使 profile 的 `package.json` 被损坏到 `dsh plugin` 都无法运行的程度，回滚仍然有效——它只做文件还原 + `pnpm install`，不依赖 `dsh plugin`。
+- Snapshot contents: the profile directory's `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml`, stored at `$DSH_HOME/profiles/.dsh-plugin-snapshots/web/<时间戳>/` (outside the profile directory), each annotated with "which plugin was being installed"; at most the 5 most recent are kept, and older ones are deleted. `node_modules` is not copied (rebuilt with `pnpm install` after restore).
+- When a plugin compatibility issue prevents DSH from starting and the web will not open, run the recovery action manually in the Plugin tab (the launcher does not auto-detect failure; the user decides):
+  1. **Uninstall latest and retry** — restart after uninstalling the most recently installed third-party plugin;
+  2. **Roll back to latest/selected and retry** — restore the profile's manifest files to a snapshot's recorded state (files not recorded in the snapshot are deleted, returning fully to the pre-install state), then run `pnpm install` in the profile directory to rebuild dependencies, verify the config combination loads with `dsh --profile web --dump-config`, and finally restart the web service.
+- Any failure in the recovery chain aborts the remaining steps (it never restarts in a broken state); the whole process is in the log.
+- The rollback chain's `pnpm install` step needs the network (registry dependency); offline, it stops at that step.
+- Even if the profile's `package.json` is corrupted to the point where `dsh plugin` cannot run, rollback still works — it only restores files and runs `pnpm install`, without depending on `dsh plugin`.
 
-## 开发运行
+## Development run
 
 ```powershell
 # 在 dsh-launcher 目录下
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python main.py
 ```
 
-## 打包成 exe
+## Package to exe
 
-**双击 `build.bat`** 即可：自动找 Python（`python` 或 `py -3`）、缺 PyInstaller 时自动安装、运行打包、成功后打开 `dist` 输出目录，窗口最后停住便于查看结果。
+**Double-click `build.bat`**: it finds Python automatically (`python` or `py -3`), installs PyInstaller if missing, runs the packaging, opens the `dist` output directory on success, and leaves the window open at the end so the result can be viewed.
 
-也可手动执行：
+You can also run it manually:
 
 ```powershell
 pip install pyinstaller
 python build.py
 ```
 
-产物为 `dist/dsh-launcher.exe`，双击即用，无需目标机器安装 Python。若旧 exe 正在运行会导致打包失败（产物被占用），先关掉再打。
+The artifact is `dist/dsh-launcher.exe`; double-click to use, with no Python install needed on the target machine. If the old exe is still running, packaging fails (the artifact is locked); close it first.
 
-## 依赖
+## Dependencies
 
 - Python 3.9+
-- PySide6（见 `requirements.txt`）
-- 目标机器需已安装 `pnpm` 且在 PATH 中（启动器只是调用它）
+- PySide6 (see `requirements.txt`)
+- The target machine must have `pnpm` installed and on PATH (the launcher only calls it)
 
-## 平台
+## Platform
 
-仅支持 Windows：进程树清理与端口探测依赖 `taskkill` / `netstat`。
+Windows only: process-tree cleanup and port probing depend on `taskkill` / `netstat`.

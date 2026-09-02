@@ -81,7 +81,7 @@ function fakeResponse(): {
   return { response, state }
 }
 
-async function mounted(config?: { trustedHosts?: string[] }): Promise<{
+async function mounted(config?: { trustedHosts?: string[]; noAuth?: boolean }): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
   connection: HostConnectionHandle
@@ -235,6 +235,26 @@ describe('connection node half', () => {
       host: 'harness.example',
       cookie: browserCookie(connection, 'harness.example'),
     }))).toBeUndefined()
+    await dispose()
+  })
+
+  it('admits tokenless requests on trusted authorities and keeps the fence when noAuth is set', async () => {
+    const { routes, connection, dispose } = await mounted({ noAuth: true, trustedHosts: ['harness.example'] })
+    // No token or cookie is required: loopback and declared authorities pass.
+    expect(connection.requestRejection(fakeRequest({ host: '127.0.0.1:3080' }))).toBeUndefined()
+    expect(connection.requestRejection(fakeRequest({ host: 'harness.example' }))).toBeUndefined()
+    // The Host/Origin fence still refuses an undeclared non-loopback authority.
+    expect(connection.requestRejection(fakeRequest({ host: 'other.example' }))).toBe(403)
+    // The launch-token exchange is a no-op: the application URL is returned unchanged.
+    expect(connection.authenticatedUrl('http://127.0.0.1:3080/x?a=1#frag')).toBe('http://127.0.0.1:3080/x?a=1#frag')
+    // index serving is always authorized.
+    const index = fakeResponse()
+    expect(connection.authorizeIndex(fakeRequest({ host: '127.0.0.1:3080' }), index.response)).toBe(true)
+    expect(index.state.status).toBeUndefined()
+    // A tokenless trusted request reaches the bridge (404 for an unclaimed endpoint).
+    const allowed = fakeResponse()
+    await routes[0]!.handler(fakeRequest({ host: '127.0.0.1:3080' }), allowed.response)
+    expect(allowed.state.status).toBe(404)
     await dispose()
   })
 
