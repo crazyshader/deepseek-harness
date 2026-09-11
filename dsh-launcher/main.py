@@ -202,6 +202,9 @@ class LauncherWindow(QMainWindow):
         self.plugin_list.itemSelectionChanged.connect(self._refresh_button_states)
         pg.addWidget(self.plugin_list, stretch=1)
         pb = QVBoxLayout()
+        self.plugin_refresh_btn = QPushButton("刷新插件")
+        self.plugin_refresh_btn.clicked.connect(self._on_plugin_refresh)
+        pb.addWidget(self.plugin_refresh_btn)
         self.plugin_uninstall_btn = QPushButton("卸载选中")
         self.plugin_uninstall_btn.clicked.connect(lambda: self._on_plugin_uninstall(False))
         pb.addWidget(self.plugin_uninstall_btn)
@@ -351,6 +354,14 @@ class LauncherWindow(QMainWindow):
         )
         if chosen:
             self.plugin_spec_edit.setText(chosen)
+
+    def _on_plugin_refresh(self) -> None:
+        """重新读取 profile manifest 与快照目录，刷新插件/快照两个列表。
+
+        列表原先只在本启动器自身安装/卸载/回滚成功时刷新；在 DSH（Web 界面或命令行）
+        里安装/卸载插件后，本窗口不会感知，需点此按钮重新检查已安装的插件。
+        """
+        self._refresh_plugin_lists()
 
     def _on_plugin_install(self) -> None:
         root = self._project_root()
@@ -588,6 +599,7 @@ class LauncherWindow(QMainWindow):
         self.stop_btn.setEnabled(running)
         self.browse_btn.setEnabled(not running)
         # 插件页签
+        self.plugin_refresh_btn.setEnabled(not running)
         self.plugin_install_btn.setEnabled(not running and has_project)
         self.plugin_browse_dir_btn.setEnabled(not running)
         self.plugin_browse_pkg_btn.setEnabled(not running)
