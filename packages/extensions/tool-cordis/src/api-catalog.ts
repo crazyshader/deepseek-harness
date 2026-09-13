@@ -611,6 +611,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the path, or undefined for an unknown id.',
       },
       {
+        signature: 'registerAssets(id: string, assets: ReadonlyMap<string, ClientAssetResponse>): () => void',
+        description: 'Serve one client package\'s static assets through the shared `/plugins` carrier, so a package keeps binary resources out of its JavaScript bundle without owning a route: every carrier that answers `/plugins` — the Web prefix route and the shell\'s fetchBundle — answers these too.\n\nAssets are addressed by path alone; a caller may append any query string (a version key, for cache separation) and still reach the same bytes. They are versioned by their owning dependency rather than by a content revision, so a stale query key must not turn into a 404.',
+        parameters: [{ name: 'id', description: 'package name owning the assets.' }, { name: 'assets', description: 'asset path relative to the package\'s asset root, to its response.' }],
+        returns: 'the disposer removing every path this call registered.',
+        throws: ['{Error} when a path is already registered, mirroring duplicate route rejection.'],
+      },
+      {
         signature: 'fetchBundle(request: Request): Response',
         description: 'Serve an advertised revisioned bundle or source map without a Web server. Unknown URLs return 404, unsupported methods return 405, and `HEAD` returns the same immutable headers without a body.',
         parameters: [{ name: 'request', description: 'shell-carrier request for a `/plugins` resource.' }],
@@ -3813,6 +3820,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ClientArtifactBaseline',
     declaration: 'export interface ClientArtifactBaseline {\n    readonly path: string;\n    readonly mtimeMs: number;\n    readonly size: number;\n}',
+  },
+  {
+    name: 'ClientAssetResponse',
+    declaration: 'export interface ClientAssetResponse {\n    readonly body: Buffer;\n    readonly contentType: string;\n}',
   },
   {
     name: 'CodeBindingErrorClass',

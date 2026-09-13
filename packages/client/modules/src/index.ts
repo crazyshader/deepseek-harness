@@ -57,6 +57,14 @@ interface WebBootRowFields {
   immediately: boolean
 }
 
+/** One static asset served beside a package's bundle: its bytes and content type. */
+export interface ClientAssetResponse {
+  /** Exact bytes to answer with. */
+  readonly body: Buffer
+  /** Content type header value for this asset. */
+  readonly contentType: string
+}
+
 /** Filesystem baseline captured before a client artifact snapshot is read. */
 export interface ClientArtifactBaseline {
   /** Absolute path of the client bundle. */
@@ -165,6 +173,15 @@ type BatchArtifact = ComboArtifact & { descriptor: WebBootBatch }
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 /** Generated request URLs stay below conservative browser and intermediary request-target limits. */
 const MAX_COMBO_URL_BYTES = 3 * 1024
+/**
+ * Startup response bodies stay small enough that one truncated transfer cannot
+ * cost the whole page: a combo script is all-or-nothing, because the batch is
+ * one `<script>` whose first incomplete statement stops every later
+ * registration in the same file. Unlike the URL limit this one yields — a
+ * single bundle above it is still addressable and servable, so it forms its
+ * own batch instead of failing composition.
+ */
+const MAX_COMBO_BODY_BYTES = 1024 * 1024
 const HASH_REVISION_LENGTH = 12
 const COMBO_REVISION_PLACEHOLDER = '0'.repeat(HASH_REVISION_LENGTH)
 
@@ -250,13 +267,28 @@ function projectedComboUrlBytes(records: readonly WebPluginRecord[]): number {
   ))
 }
 
-/** Partition one phase in graph order without allowing a generated URL above the protocol limit. */
+/** Measure the artifact bytes a batch would serve, before combo framing and gzip. */
+function comboBodyBytes(records: readonly WebPluginRecord[]): number {
+  let total = 0
+  for (const record of records) total += record.bundle.byteLength
+  return total
+}
+
+/**
+ * Partition one phase in graph order under both batch limits: the generated URL
+ * stays addressable, and the served body stays recoverable. Graph order is
+ * preserved, so a batch boundary never reorders a requested module ahead of its
+ * consumer.
+ */
 function partitionComboRecords(records: readonly WebPluginRecord[]): WebPluginRecord[][] {
   const chunks: WebPluginRecord[][] = []
   let current: WebPluginRecord[] = []
   for (const record of records) {
     const candidate = [...current, record]
-    if (projectedComboUrlBytes(candidate) <= MAX_COMBO_URL_BYTES) {
+    // An oversized single bundle cannot be split, so the body limit constrains
+    // only a batch that already carries a record; the URL limit below stays hard.
+    const withinBody = current.length === 0 || comboBodyBytes(candidate) <= MAX_COMBO_BODY_BYTES
+    if (withinBody && projectedComboUrlBytes(candidate) <= MAX_COMBO_URL_BYTES) {
       current = candidate
       continue
     }
@@ -532,6 +564,12 @@ export class ClientModuleRegistry extends Service {
   private batchResponses = new Map<string, { body: Buffer; contentType: string }>()
   /** One prior graph generation covers a request racing the HMR recomposition that replaced its URL. */
   private previousBatchResponses = new Map<string, { body: Buffer; contentType: string }>()
+  /**
+   * Package-owned static assets keyed by path. Held separately from the
+   * response tables because {@link compose} replaces those wholesale on every
+   * graph change, while an asset's lifetime belongs to its registrant's effect.
+   */
+  private readonly assets = new Map<string, ClientAssetResponse>()
   private flushQueued = false
   private composed: WebBootGraph
 
@@ -595,6 +633,39 @@ export class ClientModuleRegistry extends Service {
    */
   clientPath(id: string): string | undefined {
     return this.table.get(id)?.meta.clientPath
+  }
+
+  /**
+   * Serve one client package's static assets through the shared `/plugins`
+   * carrier, so a package keeps binary resources out of its JavaScript bundle
+   * without owning a route: every carrier that answers `/plugins` — the Web
+   * prefix route and the shell's {@link fetchBundle} — answers these too.
+   *
+   * Assets are addressed by path alone; a caller may append any query string
+   * (a version key, for cache separation) and still reach the same bytes. They
+   * are versioned by their owning dependency rather than by a content
+   * revision, so a stale query key must not turn into a 404.
+   * @param id - package name owning the assets.
+   * @param assets - asset path relative to the package's asset root, to its response.
+   * @returns the disposer removing every path this call registered.
+   * @throws {Error} when a path is already registered, mirroring duplicate route rejection.
+   */
+  registerAssets(id: string, assets: ReadonlyMap<string, ClientAssetResponse>): () => void {
+    const registered: string[] = []
+    for (const [path, response] of assets) {
+      const url = `/plugins/${id}/assets/${path}`
+      if (this.assets.has(url)) {
+        // Roll back this call's own entries: a partially applied registration
+        // would leave the disposer owning less than the caller registered.
+        for (const applied of registered) this.assets.delete(applied)
+        throw new Error(`client-modules: duplicate asset path "${url}"`)
+      }
+      this.assets.set(url, response)
+      registered.push(url)
+    }
+    return () => {
+      for (const url of registered) this.assets.delete(url)
+    }
   }
 
   /**
@@ -1012,7 +1083,12 @@ export class ClientModuleRegistry extends Service {
     if (method !== 'GET' && method !== 'HEAD') return { status: 405 }
     const requestUrl = new URL(url, 'http://x')
     const resourceUrl = `${requestUrl.pathname}${requestUrl.search}`
-    const response = this.responses.get(resourceUrl) ?? this.previousBatchResponses.get(resourceUrl)
+    // Bundles are content-addressed, so their rev query is part of the key.
+    // Assets are versioned by their owning dependency, so the query is a cache
+    // key the server must not validate — match those on pathname alone.
+    const response = this.responses.get(resourceUrl)
+      ?? this.previousBatchResponses.get(resourceUrl)
+      ?? this.assets.get(requestUrl.pathname)
     if (response !== undefined) {
       return {
         status: 200,

@@ -1832,6 +1832,11 @@
       "source": "packages/client/modules/src/index.ts"
     },
     {
+      "doc": "docs/subsystems/client-modules.md",
+      "symbol": "ClientAssetResponse",
+      "source": "packages/client/modules/src/index.ts"
+    },
+    {
       "doc": "docs/subsystems/session-telemetry.md",
       "symbol": "SessionTelemetryCapture",
       "source": "packages/session/session-telemetry/src/coordinator.ts"

@@ -82,7 +82,9 @@ interface WebBootGraph {
 
 ## bundle 路由与 index 注入
 
-`GET`／`HEAD /plugins/??<package-a>/client.js,<package-b>/client.js&rev=<rev>` 提供精确生成的 combo 脚本；单资源请求采用同一形式，也是 HMR 路径。其绝对 `sourceMappingURL` 平行改写每个资源后缀，得到 `/plugins/??<package-a>/client.js.map,<package-b>/client.js.map&rev=<rev>`。即使只有一个资源，map 仍采用 Indexed Source Map v3。组件有自带 map 时直接用于对应 section；没有时则获得 identity section，其 `sourcesContent` 是构建后 bundle，source 名取打包后的 `sourceURL` 或插件路由。每条启动请求 URL 按 UTF-8 字节计算都不超过 3 KiB；切分按更长的 map 形式计算。所有 application URL 都会预加载，所有 bootstrap URL 都会在图全局量与 Vite entry 之前执行。所有已发布响应都使用长期 immutable 缓存。未知或被修改的资源列表、缺少 revision 及陈旧 revision 都返回 404，绝不提供其他字节，也不会让 SPA fallback 把 HTML 当作 JavaScript 返回；其他方法返回 405。注入行在每次 index 渲染时携带当前图，因此重新加载总是基于实时组合启动。
+`GET`／`HEAD /plugins/??<package-a>/client.js,<package-b>/client.js&rev=<rev>` 提供精确生成的 combo 脚本；单资源请求采用同一形式，也是 HMR 路径。其绝对 `sourceMappingURL` 平行改写每个资源后缀，得到 `/plugins/??<package-a>/client.js.map,<package-b>/client.js.map&rev=<rev>`。即使只有一个资源，map 仍采用 Indexed Source Map v3。组件有自带 map 时直接用于对应 section；没有时则获得 identity section，其 `sourcesContent` 是构建后 bundle，source 名取打包后的 `sourceURL` 或插件路由。每条启动请求 URL 按 UTF-8 字节计算都不超过 3 KiB，每个启动响应体都不超过 1 MiB；URL 的度量按更长的 map 形式计算。两个上限的区别在于是否让步：URL 超长会让组合失败，而单个超过体积上限的 bundle 仍然可寻址，于是自成一批。体积上限之所以存在，是因为一个批次就是一个 `<script>`，其中第一处不完整的语句会让同一文件里后续所有注册都不再执行，因此传输被截断的代价是整个页面，而不是一个 row（见[决议](../../.agents/notes/implemented/architecture/2026-09-12-pdfjs-assets-out-of-bundle.zh.md)）。所有 application URL 都会预加载，所有 bootstrap URL 都会在图全局量与 Vite entry 之前执行。所有已发布响应都使用长期 immutable 缓存。未知或被修改的资源列表、缺少 revision 及陈旧 revision 都返回 404，绝不提供其他字节，也不会让 SPA fallback 把 HTML 当作 JavaScript 返回；其他方法返回 405。注入行在每次 index 渲染时携带当前图，因此重新加载总是基于实时组合启动。
+
+`GET`／`HEAD /plugins/<id>/assets/<path>` 提供某个包已登记的静态资产，让包可以把二进制资源放在 JavaScript bundle 之外而不必自持路由：凡是能应答 `/plugins` 的载体都能应答这些资产，包括在没有 web 服务器的场合使用的 shell 载体。与 bundle 不同，资产只按 pathname 匹配——它们由所属依赖定版，而不是由内容 revision 定版，因此版本查询串只是缓存键，其取值绝不改变所提供的字节，来自另一个版本的键会被解析出来而不是把一份可用文档打死。资产存放在启动图永不替换的表里，因此重组不会动到它们；它们的生命周期属于登记方的 effect。
 
 ## 服务
 
@@ -95,6 +97,16 @@ interface ClientArtifactBaseline {
   readonly mtimeMs: number
   /** Bundle size in bytes. */
   readonly size: number
+}
+```
+
+```ts type-equiv
+/** One static asset served beside a package's bundle: its bytes and content type. */
+interface ClientAssetResponse {
+  /** Exact bytes to answer with. */
+  readonly body: Buffer
+  /** Content type header value for this asset. */
+  readonly contentType: string
 }
 ```
 
@@ -129,6 +141,23 @@ graph(): WebBootGraph
  * @returns the path, or undefined for an unknown id.
  */
 clientPath(id: string): string | undefined
+
+/**
+ * Serve one client package's static assets through the shared `/plugins`
+ * carrier, so a package keeps binary resources out of its JavaScript bundle
+ * without owning a route: every carrier that answers `/plugins` — the Web
+ * prefix route and the shell's {@link fetchBundle} — answers these too.
+ *
+ * Assets are addressed by path alone; a caller may append any query string
+ * (a version key, for cache separation) and still reach the same bytes. They
+ * are versioned by their owning dependency rather than by a content
+ * revision, so a stale query key must not turn into a 404.
+ * @param id - package name owning the assets.
+ * @param assets - asset path relative to the package's asset root, to its response.
+ * @returns the disposer removing every path this call registered.
+ * @throws {Error} when a path is already registered, mirroring duplicate route rejection.
+ */
+registerAssets(id: string, assets: ReadonlyMap<string, ClientAssetResponse>): () => void
 
 /**
  * Serve an advertised revisioned bundle or source map without a Web server.

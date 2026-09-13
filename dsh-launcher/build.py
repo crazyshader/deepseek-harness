@@ -38,10 +38,12 @@ def main() -> int:
     print("运行:", " ".join(args))
     code = subprocess.call(args)
 
-    # 成功判据：exe 存在且修改时间已更新。PyInstaller 的清理阶段偶尔返回
-    # 非 0 退出码，不足为凭；而“文件存在但未更新”说明旧产物被占用未能覆盖，
-    # 那是失败而非成功。
-    if _OUTPUT_EXE.is_file() and _OUTPUT_EXE.stat().st_mtime > before_mtime:
+    # 成功判据：exe 存在，且「退出码为 0」或「修改时间已更新」二者之一成立。
+    # 两个条件都需要，因为两种正常情形各只满足其中一个：
+    #   - 缓存命中：PyInstaller 判定产物已是最新，不重写文件，mtime 不变但退出码 0；
+    #   - 清理阶段偶发非 0 退出码：退出码不足为凭，但 exe 确实被重新写出。
+    # 只有「退出码非 0 且 mtime 未更新」才是真失败——旧产物被占用没能覆盖。
+    if _OUTPUT_EXE.is_file() and (code == 0 or _OUTPUT_EXE.stat().st_mtime > before_mtime):
         print(f"打包成功: {_OUTPUT_EXE}")
         return 0
     if _OUTPUT_EXE.is_file() and before_mtime > 0:

@@ -640,6 +640,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   WorkspaceRenameRequest: 'workspace.md',
   WorkspaceValue: 'workspace.md',
   ClientArtifactBaseline: 'client-modules.md',
+  ClientAssetResponse: 'client-modules.md',
   WebBootGraph: 'client-modules.md',
   SessionTelemetryRecord: 'session-telemetry.md',
   WorkflowRunInfo: 'workflow.md',

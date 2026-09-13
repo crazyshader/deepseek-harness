@@ -593,6 +593,113 @@ describe('client bundle activation', () => {
     }
   })
 
+  it('serves package assets through every carrier, keyed by path alone', async () => {
+    const packageName = '@fixture/asset-owner'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+    const { service, route } = constructWithRoute([packageName])
+
+    const dispose = service.registerAssets(packageName, new Map([
+      ['cmaps/78-EUC-H.bcmap', { body: Buffer.from([1, 2, 3]), contentType: 'application/octet-stream' }],
+      ['wasm/openjpeg.wasm', { body: Buffer.from([0, 97, 115, 109]), contentType: 'application/wasm' }],
+    ]))
+    const base = `/plugins/${packageName}/assets`
+
+    const asset = await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`)
+    expect(asset.status).toBe(200)
+    expect([...asset.body]).toEqual([1, 2, 3])
+    expect(asset.headers?.['content-type']).toBe('application/octet-stream')
+    expect(asset.headers?.['cache-control']).toBe('public, max-age=31536000, immutable')
+
+    // The version query is a cache key, not part of the identity: any value
+    // reaches the same bytes, so a stale key cannot 404 a working PDF.
+    expect([...(await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap?v=6.3.289`)).body]).toEqual([1, 2, 3])
+    expect([...(await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap?v=stale`)).body]).toEqual([1, 2, 3])
+
+    expect((await routeRequest(route, `${base}/wasm/openjpeg.wasm`)).headers?.['content-type'])
+      .toBe('application/wasm')
+    expect((await routeRequest(route, `${base}/cmaps/absent.bcmap`)).status).toBe(404)
+    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`, 'POST')).status).toBe(405)
+    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`, 'HEAD')).body).toHaveLength(0)
+
+    // The shell carrier (Electron, which disables the web server) answers the
+    // same paths through fetchBundle.
+    const shell = service.fetchBundle(new Request(`dsh-app://app${base}/wasm/openjpeg.wasm`))
+    expect(shell.status).toBe(200)
+    expect([...new Uint8Array(await shell.arrayBuffer())]).toEqual([0, 97, 115, 109])
+
+    // A graph recomposition replaces the bundle response tables; assets outlive it.
+    service.rebuilt(packageName)
+    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`)).status).toBe(200)
+
+    dispose()
+    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`)).status).toBe(404)
+    expect((await routeRequest(route, `${base}/wasm/openjpeg.wasm`)).status).toBe(404)
+  })
+
+  it('rejects a duplicate asset path without retaining the partial registration', async () => {
+    const packageName = '@fixture/asset-duplicate'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+    const { service, route } = constructWithRoute([packageName])
+    const body = { body: Buffer.from([7]), contentType: 'application/octet-stream' }
+
+    const dispose = service.registerAssets(packageName, new Map([['cmaps/a.bcmap', body]]))
+    expect(() => service.registerAssets(packageName, new Map([
+      ['cmaps/b.bcmap', body],
+      ['cmaps/a.bcmap', body],
+    ]))).toThrow('duplicate asset path')
+    // The failed call must leave nothing behind, including the path it did apply
+    // before reaching the conflict.
+    expect((await routeRequest(route, `/plugins/${packageName}/assets/cmaps/b.bcmap`)).status).toBe(404)
+    expect((await routeRequest(route, `/plugins/${packageName}/assets/cmaps/a.bcmap`)).status).toBe(200)
+    dispose()
+  })
+
+  it('splits startup combos before the served body exceeds 1 MiB', async () => {
+    const packageNames = ['@fixture/body-first', '@fixture/body-second', '@fixture/body-third']
+    // Three artifacts of 400 KiB: the first two fit one batch, the third does not.
+    const filler = `module.exports = { pad: ${JSON.stringify('x'.repeat(400 * 1024))} }\n`
+    for (const packageName of packageNames) {
+      const clientPath = writePackage(packageName)
+      mkdirSync(dirname(clientPath), { recursive: true })
+      writeFileSync(clientPath, filler)
+    }
+
+    const { service, route } = constructWithRoute(packageNames)
+    const batches = service.graph().batches.filter(batch => batch.phase === 'application')
+    expect(batches.map(batch => batch.entries)).toEqual([
+      ['@fixture/body-first', '@fixture/body-second'],
+      ['@fixture/body-third'],
+    ])
+    for (const batch of batches) {
+      const response = await routeRequest(route, batch.url)
+      expect(response.status).toBe(200)
+      expect(response.body.byteLength).toBeLessThanOrEqual(1024 * 1024 + filler.length)
+    }
+  })
+
+  it('gives a single oversized bundle its own batch instead of failing composition', async () => {
+    const packageNames = ['@fixture/oversized', '@fixture/oversized-neighbour']
+    const oversizedPath = writePackage(packageNames[0]!)
+    mkdirSync(dirname(oversizedPath), { recursive: true })
+    writeFileSync(oversizedPath, `module.exports = { pad: ${JSON.stringify('y'.repeat(1200 * 1024))} }\n`)
+    const neighbourPath = writePackage(packageNames[1]!)
+    mkdirSync(dirname(neighbourPath), { recursive: true })
+    writeFileSync(neighbourPath, 'module.exports = {}\n')
+
+    const { service, route } = constructWithRoute(packageNames)
+    const batches = service.graph().batches.filter(batch => batch.phase === 'application')
+    expect(batches.map(batch => batch.entries)).toEqual([
+      ['@fixture/oversized'],
+      ['@fixture/oversized-neighbour'],
+    ])
+    expect((await routeRequest(route, batches[0]!.url)).body.byteLength).toBeGreaterThan(1024 * 1024)
+    expect((await routeRequest(route, batches[1]!.url)).status).toBe(200)
+  })
+
   it('serves the source map beside a registered client bundle', async () => {
     const packageName = '@fixture/source-map'
     const clientPath = writePackage(packageName)

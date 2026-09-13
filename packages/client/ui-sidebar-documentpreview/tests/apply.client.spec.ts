@@ -7,12 +7,15 @@
  * and face — and that every registration is gone after dispose, which is what
  * makes a reload safe.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SidebarRightTabRegistry } from '@deepseek-ai/dsh-client-ui-sidebar-right/src/client/tab-registry.ts'
 import { TEXTPREVIEW_ID, TEXTPREVIEW_KIND } from '../src/client/definition.ts'
 import { apply, inject } from '../src/client/index.ts'
-import { apply as hostApply } from '../src/index.ts'
+import { apply as hostApply, inject as hostInject } from '../src/index.ts'
+import { PDF_ASSET_OUTPUT_DIR } from '../src/pdf-asset-route.ts'
 import { TextPreview } from '../src/client/TextPreview.tsx'
 import { TextTitle } from '../src/client/TextTitle.tsx'
 import { TextBody } from '../src/client/text/TextBody.tsx'
@@ -77,10 +80,45 @@ async function boot() {
   return { tabs, registered, dictionaries, fiber, workspaceFiles }
 }
 
-describe('ui-sidebar-documentpreview apply', () => {
-  it('keeps the host Loader entry inert', () => {
-    expect(hostApply).not.toThrow()
+describe('ui-sidebar-documentpreview host half', () => {
+  it('publishes the PDF.js resources and takes them back on disposal', async () => {
+    const ctx = new Context()
+    const registered = new Map<string, { body: Buffer; contentType: string }>()
+    let disposed = false
+    ctx.provide('clientModules', {
+      registerAssets: vi.fn((id: string, assets: ReadonlyMap<string, { body: Buffer; contentType: string }>) => {
+        expect(id).toBe('@deepseek-ai/dsh-client-ui-sidebar-documentpreview')
+        for (const [path, response] of assets) registered.set(path, response)
+        return () => { disposed = true }
+      }),
+    } as never)
+    const fiber = ctx.plugin({ inject: [...hostInject], apply: hostApply })
+    await fiber.await()
+
+    // Every request kind reaches its own directory, and PDF.js addresses these
+    // by exact filename, so the served paths must be the real ones.
+    expect(registered.has('cmaps/78-EUC-H.bcmap')).toBe(true)
+    expect(registered.has('standard_fonts/FoxitSerif.pfb')).toBe(true)
+    expect(registered.has('standard_fonts/LiberationSans-Regular.ttf')).toBe(true)
+    expect(registered.get('wasm/openjpeg.wasm')?.contentType).toBe('application/wasm')
+    // The wasm directory also ships plain-JS fallbacks; they are opaque bytes to
+    // PDF.js, which reads every one of these through the same factory.
+    expect(registered.get('wasm/openjpeg_nowasm_fallback.js')?.contentType).toBe('application/octet-stream')
+    expect(registered.get('cmaps/78-EUC-H.bcmap')?.contentType).toBe('application/octet-stream')
+    // Licenses are disclosed in the bundle banner; serving them as assets would
+    // put the same text in two places.
+    expect([...registered.keys()].filter(path => path.includes('LICENSE'))).toEqual([])
+    // The served bytes are the build's own copy, byte for byte — the host reads
+    // this package, never a runtime-resolved pdfjs-dist.
+    expect(registered.get('wasm/openjpeg.wasm')?.body)
+      .toEqual(readFileSync(join(import.meta.dirname, '..', PDF_ASSET_OUTPUT_DIR, 'wasm/openjpeg.wasm')))
+
+    await fiber.dispose()
+    expect(disposed).toBe(true)
   })
+})
+
+describe('ui-sidebar-documentpreview apply', () => {
 
   it('registers the type, its dictionaries, and the body and title seats under the type\'s id, the body with a store and a face', async () => {
     const { tabs, registered, dictionaries } = await boot()

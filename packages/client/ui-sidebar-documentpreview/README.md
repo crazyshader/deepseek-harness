@@ -16,6 +16,7 @@ Preview readable files in the right Sidebar and choose among registered renderer
 - [What it registers](#what-it-registers)
 - [Addresses](#addresses)
 - [How it reads](#how-it-reads)
+- [PDF.js resources](#pdfjs-resources)
 - [Navigation](#navigation)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
@@ -55,6 +56,13 @@ Shared copy comes from `sidebarDocumentPreview`; each builtin renderer owns its 
 
 Initial reads, additional pages, and HTML/PDF/image preparation share a loading indicator that respects reduced-motion preferences. Loaded pages stay visible while another page loads. PDF pages form one vertical, width-fitted sequence and render lazily near the viewport. Code previews show source line numbers by default without including them in copied text; plain text uses the same font size and line height as code. Code sits on the pane's own background rather than the chat card's fill; its banner is adjacent to a full-height inner scrollport, so both scrollbars begin below the copy control.
 
+<a id="pdfjs-resources"></a>
+## PDF.js resources
+
+PDF.js needs three sets of binary resources at render time: CMaps for CJK encodings, standard fonts for documents that embed none, and wasm decoders for JPEG2000/JBIG2 images. They total about 3.4 MB, so the host half serves them and the browser fetches one only when a document asks for it. The host reads them out of the resolved `pdfjs-dist` and publishes them through `ctx.clientModules.registerAssets`, which addresses them at `/plugins/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/assets/<directory>/<file>`. That carrier is the reason this package owns no route of its own: every deployment already answers `/plugins`, including a shell-owned carrier with no web server.
+
+The build inlines the resource *names*, not their bytes, and the browser half refuses a name absent from that list before issuing any request — a traversing path, an unknown file, and a prototype member are all simply not in the advertised array. The host serves only what its own directory listing contains, so neither side relies on the other having checked. Requests carry the build's `pdfjs-dist` version as a query key for cache separation; the host matches on path alone, so a key left over from another version resolves rather than failing a working document. An asset that cannot be fetched fails the document instead of rendering it with substituted glyphs or skipped images.
+
 <a id="navigation"></a>
 ## Navigation
 
@@ -76,6 +84,7 @@ No direct effect; what the user reads here never enters a model request.
 - **Sequential text and bounded complete files.** Deep source lines require the preceding pages; PDF, HTML, and images require a complete result within the Host's `maxFileBytes` cap.
 - **Byte-view scroll state is not restored.** PDF, HTML, and images can return to the top when their renderer remounts or reloads; image horizontal position is never restored, and HTML iframe scrolling belongs to its opaque browsing context.
 - **Finite local HTML dependencies.** Only direct classic `.js` and stylesheet `.css` references are packed. Browser-resolved resources retain browser origin and network restrictions; no runtime file-read bridge is exposed to the iframe.
+- **The PDF.js worker source stays in the bundle.** Its 1.27 MB remains inlined because the dynamic client factory has no module URL from which to resolve a Worker file, and the runtime builds its Worker from a Blob over that source. Moving it out would mean fetching the source before constructing the Blob, or importing the served URL from inside it; neither is done here.
 - **Package-local wrap glyphs.** `IconWrapFill16` and `IconNowrapFill16` live in `src/client/icons.tsx` until the shared icon set carries them; their props already match the shared icon contract.
 - **Scroll writes are unthrottled.** Every scroll event records its offset in the store; the line blocks are memoized so the resulting re-render hands React the same elements back.
 

@@ -16,6 +16,7 @@ kind: "package-reference"
 - [注册了什么](#what-it-registers)
 - [地址](#addresses)
 - [怎么读](#how-it-reads)
+- [PDF.js 资源](#pdfjs-resources)
 - [导航](#navigation)
 - [模型体验](#model-experience)
 - [已知限制与延期工作](#known-limitations-and-deferred-work)
@@ -55,6 +56,13 @@ PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 通过 Blob URL 在 `<img>` 静态�
 
 首次读取、追加页及 HTML/PDF/图片准备共用加载指示器，并遵循减少动态效果偏好。下一页加载期间保留已显示的内容。PDF 页面组成一个纵向、适配宽度的连续序列，并在接近视口时惰性渲染。代码预览默认显示源码行号，但复制文本不包含行号；纯文本与代码使用相同字号和行高。代码直接坐在分栏自身的背景上，而不是会话卡片的填充色；复制条与占满剩余高度的内部滚动区相邻，因此横纵滚动条都从复制控件下方开始。
 
+<a id="pdfjs-resources"></a>
+## PDF.js 资源
+
+PDF.js 在渲染时需要三类二进制资源：CJK 编码用的 CMap、文档未嵌字体时用的标准字体、JPEG2000/JBIG2 图像用的 wasm 解码器。它们合计约 3.4 MB，因此由 node 半侧提供，浏览器只在某个文档真的请求时才取其中一个。node 半侧从解析到的 `pdfjs-dist` 读出它们，经 `ctx.clientModules.registerAssets` 发布，寻址形式为 `/plugins/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/assets/<目录>/<文件>`。选这个载体正是本包不自持路由的原因：凡是部署都已经在应答 `/plugins`，包括没有 web 服务器、由 shell 持有的载体。
+
+构建内联的是资源**名字**而非字节，浏览器半侧在发出任何请求之前就拒绝不在该清单里的名字——穿越路径、未知文件、原型链成员，都只是不在已公告的数组里。node 半侧只提供自己目录列表里有的东西，因此两侧都不依赖对方已经校验过。请求携带构建时的 `pdfjs-dist` 版本作为缓存分离的查询键；node 半侧只按路径匹配，所以来自另一个版本的遗留键会被解析出来，而不是把一份本来可用的文档打死。取不到的资源会让文档加载失败，而不是用替代字形或跳过图像把它渲染出来。
+
 <a id="navigation"></a>
 ## 导航
 
@@ -76,6 +84,7 @@ PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 通过 Blob URL 在 `<img>` 静态�
 - **文本顺序分页，完整文件受限。** 定位深处源码行需要先加载此前各页；PDF、HTML 和图片必须取得 Host `maxFileBytes` 上限内的完整结果。
 - **字节视图不恢复滚动位置。** PDF、HTML 与图片的渲染器重新挂载或重新载入时可能回到顶部；图片的横向位置始终不恢复，HTML iframe 的滚动属于其不透明浏览上下文。
 - **本地 HTML 依赖集合有限。** 只打包直接引用的经典 `.js` 脚本和 `.css` 样式表。浏览器解析的资源仍受浏览器源与网络规则限制；iframe 不获得运行时文件读取桥接。
+- **PDF.js worker 源码仍留在 bundle 里。** 那 1.27 MB 仍然内联，因为动态 client factory 没有可用来解析 Worker 文件的模块 URL，运行时是用这份源码造 Blob 得到 Worker 的。要把它移出去，就得在造 Blob 之前先取回源码，或者在 Blob 内部 import 已提供的 URL；这里都没有做。
 - **换行图标为包内自绘。** `IconWrapFill16` 与 `IconNowrapFill16` 住在 `src/client/icons.tsx`，直到共享图标集提供为止；它们的 props 已与共享图标契约一致。
 - **滚动写入未节流。** 每次滚动事件都把偏移记进 store；行块已 memo 化，于是由此引发的重渲染交还给 React 的是同一批元素。
 

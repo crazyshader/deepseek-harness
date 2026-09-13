@@ -67,7 +67,11 @@ application combo 脚本在启动时注册插件 factory；模块主体仍保持
 
 node 半侧逐包增量扫描——没有全量重扫路径。每次 `internal/plugin` 发出都会把该 fiber 的 entry 名标脏；一个微任务 flush 会把每个脏名与当前 loader 条目对账，激活 pass 播种同一脏集合并同步 flush，因此首次扫描与稳态共用同一实现。包元数据按 Loader specifier 与所属 tree base URL 缓存至重启，解析出的 manifest 包名作为浏览器模块身份。若不同的 active Loader source 解析到同一包名，组合会失败；移除冲突来源后，剩余来源无需重启 fiber 即可接替。bundle 内容变更只能通过 `rebuilt()`（HMR 钩子）进入图。
 
-node 半侧会在发布前快照每个客户端 bundle 及其现有 source map。它把资源分组到 `/plugins/??...&rev=...` combo URL：modules row 使用一个 bootstrap combo，其余 row 使用一个或多个 application combo；每个阶段都会在 URL 超过 3 KiB 之前分区。每个 combo map 都是 Indexed Source Map v3，并在可用时使用作者提供的 section，否则为已打包 bundle 生成 identity section。初始逐插件 revision 使用进程 nonce，所以启动时不哈希每个插件；HMR 只哈希被报告为已变化的产物。已公告响应不可变；未知组合或 revision 返回 404。
+node 半侧会在发布前快照每个客户端 bundle 及其现有 source map。它把资源分组到 `/plugins/??...&rev=...` combo URL：modules row 使用一个 bootstrap combo，其余 row 使用一个或多个 application combo。每个阶段都会在 URL 超过 3 KiB 或响应体超过 1 MiB 之前分区：combo 脚本是全有或全无的，因为一个批次就是一个 `<script>`，其中第一处不完整的语句会让同一文件里后续所有注册都不再执行。体积上限会让步，URL 上限不会——单个超过体积上限的 bundle 仍然可寻址，因此它自成一批，而不是让组合失败。每个 combo map 都是 Indexed Source Map v3，并在可用时使用作者提供的 section，否则为已打包 bundle 生成 identity section。初始逐插件 revision 使用进程 nonce，所以启动时不哈希每个插件；HMR 只哈希被报告为已变化的产物。已公告响应不可变；未知组合或 revision 返回 404。
+
+### 包资产
+
+`registerAssets(id, assets)` 把某个包的静态资源提供在 `/plugins/<id>/assets/<path>`，于是包可以把二进制资源放在 JavaScript bundle 之外，而不必自己持有一条路由：凡是能应答 `/plugins` 的载体都能应答这些资产。资产只按 pathname 匹配，因此调用方可以附加版本查询串做缓存分离，任何取值都能取到同一份字节——资产由其所属依赖定版，而不是由内容 revision 定版，过期的缓存键不该变成 404。登记返回的 disposer 恰好对应它新增的那些路径；路径已存在时拒绝登记，并回滚本次调用已经生效的部分。资产的生命周期属于登记方的 effect，而不属于启动图：重组会替换 bundle 响应表，资产不受影响。
 
 ### 启动清单注入
 

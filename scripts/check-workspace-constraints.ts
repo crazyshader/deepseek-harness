@@ -159,6 +159,10 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-client-ui-dockkit': ['lib/**/*.css'],
   '@deepseek-ai/dsh-client-web': ['lib/**/*.css'],
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
+  // PDF.js CMaps, standard fonts, and wasm decoders: the build copies them here
+  // and the host half serves them, so they must travel with the package instead
+  // of being resolved out of pdfjs-dist by an installed layout.
+  '@deepseek-ai/dsh-client-ui-sidebar-documentpreview': ['lib/pdfjs-assets/**'],
   // The CPython side ships as source .py files, published as-is rather than built.
   '@deepseek-ai/dsh-experimental-code-runtime-python': ['py/**/*.py'],
   // The shipped preset compositions travel inside the roster package.

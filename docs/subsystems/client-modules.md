@@ -82,7 +82,9 @@ Package metadata — including the negative "not a client package" verdict — i
 
 ## The bundle route and index injection
 
-`GET`/`HEAD /plugins/??<package-a>/client.js,<package-b>/client.js&rev=<rev>` serves an exact generated combo script; a one-resource request uses the same form and is the HMR path. Its absolute `sourceMappingURL` changes every resource suffix in parallel, yielding `/plugins/??<package-a>/client.js.map,<package-b>/client.js.map&rev=<rev>`. The map is Indexed Source Map v3 even for one resource. An authored component map supplies its section; a component without one receives an identity section whose `sourcesContent` is the generated bundle and whose source name is its packaged `sourceURL` or plugin route. Every startup request URL is at most 3 KiB measured as UTF-8 bytes; partitioning uses the longer map form. All application URLs are preloaded, and all bootstrap URLs execute before the graph global and Vite entry. All advertised responses use long-lived immutable caching. Unknown or altered resource lists, missing revisions, and stale revisions answer 404 rather than serving different bytes or letting the SPA fallback return HTML as JavaScript; other methods are 405. The injection rows carry the current graph on every index render, so a reload always boots against the live composition.
+`GET`/`HEAD /plugins/??<package-a>/client.js,<package-b>/client.js&rev=<rev>` serves an exact generated combo script; a one-resource request uses the same form and is the HMR path. Its absolute `sourceMappingURL` changes every resource suffix in parallel, yielding `/plugins/??<package-a>/client.js.map,<package-b>/client.js.map&rev=<rev>`. The map is Indexed Source Map v3 even for one resource. An authored component map supplies its section; a component without one receives an identity section whose `sourcesContent` is the generated bundle and whose source name is its packaged `sourceURL` or plugin route. Every startup request URL is at most 3 KiB measured as UTF-8 bytes, and every startup response body is at most 1 MiB; partitioning uses the longer map form for the URL measurement. The two limits differ in whether they yield: an oversized URL fails composition, while a single bundle above the body limit is still addressable and forms its own batch. The body limit exists because a batch is one `<script>` whose first incomplete statement stops every later registration in the same file, so a truncated transfer costs the whole page rather than one row ([decision](../../.agents/notes/implemented/architecture/2026-09-12-pdfjs-assets-out-of-bundle.md)). All application URLs are preloaded, and all bootstrap URLs execute before the graph global and Vite entry. All advertised responses use long-lived immutable caching. Unknown or altered resource lists, missing revisions, and stale revisions answer 404 rather than serving different bytes or letting the SPA fallback return HTML as JavaScript; other methods are 405. The injection rows carry the current graph on every index render, so a reload always boots against the live composition.
+
+`GET`/`HEAD /plugins/<id>/assets/<path>` serves a package's registered static assets, letting a package keep binary resources out of its JavaScript bundle without owning a route: every carrier answering `/plugins` answers these too, including the shell carrier used where no web server exists. Unlike bundles, assets match on pathname alone — they are versioned by their owning dependency rather than by a content revision, so a version query is a cache key whose value never changes which bytes are served, and a key from another version resolves rather than failing a working document. Assets live in a table the graph never replaces, so recomposition leaves them in place; their lifetime belongs to the registrant's effect.
 
 ## The service
 
@@ -95,6 +97,16 @@ interface ClientArtifactBaseline {
   readonly mtimeMs: number
   /** Bundle size in bytes. */
   readonly size: number
+}
+```
+
+```ts type-equiv
+/** One static asset served beside a package's bundle: its bytes and content type. */
+interface ClientAssetResponse {
+  /** Exact bytes to answer with. */
+  readonly body: Buffer
+  /** Content type header value for this asset. */
+  readonly contentType: string
 }
 ```
 
@@ -129,6 +141,23 @@ graph(): WebBootGraph
  * @returns the path, or undefined for an unknown id.
  */
 clientPath(id: string): string | undefined
+
+/**
+ * Serve one client package's static assets through the shared `/plugins`
+ * carrier, so a package keeps binary resources out of its JavaScript bundle
+ * without owning a route: every carrier that answers `/plugins` — the Web
+ * prefix route and the shell's {@link fetchBundle} — answers these too.
+ *
+ * Assets are addressed by path alone; a caller may append any query string
+ * (a version key, for cache separation) and still reach the same bytes. They
+ * are versioned by their owning dependency rather than by a content
+ * revision, so a stale query key must not turn into a 404.
+ * @param id - package name owning the assets.
+ * @param assets - asset path relative to the package's asset root, to its response.
+ * @returns the disposer removing every path this call registered.
+ * @throws {Error} when a path is already registered, mirroring duplicate route rejection.
+ */
+registerAssets(id: string, assets: ReadonlyMap<string, ClientAssetResponse>): () => void
 
 /**
  * Serve an advertised revisioned bundle or source map without a Web server.
