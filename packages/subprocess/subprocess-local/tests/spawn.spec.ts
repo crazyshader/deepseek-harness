@@ -64,9 +64,11 @@ function shellArgv(command: string): string[] {
   }
 }
 
-const { failNextClose, failNextUnlink } = vi.hoisted(() => ({
+const { failNextClose, failNextUnlink, failNextOpen, failNextWrite } = vi.hoisted(() => ({
   failNextClose: { value: false },
   failNextUnlink: { value: false },
+  failNextOpen: { value: 0 },
+  failNextWrite: { value: 0 },
 }))
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
@@ -85,6 +87,20 @@ vi.mock('node:fs', async (importOriginal) => {
         throw Object.assign(new Error('simulated EIO on unlink'), { code: 'EIO' })
       }
       actual.unlinkSync(path)
+    },
+    openSync(...args: Parameters<typeof actual.openSync>): number {
+      if (failNextOpen.value > 0) {
+        failNextOpen.value -= 1
+        throw Object.assign(new Error('simulated ENOENT on open'), { code: 'ENOENT' })
+      }
+      return actual.openSync(...args)
+    },
+    writeSync(...args: Parameters<typeof actual.writeSync>): number {
+      if (failNextWrite.value > 0) {
+        failNextWrite.value -= 1
+        throw Object.assign(new Error('simulated EIO on write'), { code: 'EIO' })
+      }
+      return actual.writeSync(...args)
     },
   }
 })
@@ -511,6 +527,27 @@ describe('output truncation and spill', () => {
     expect(result.stdout.text).toContain('line-0200')
     expect(result.stdout.spillPath).toBeUndefined()
   })
+
+  it('recovers from a spill directory removed by external cleanup while running', async () => {
+    // Mirrors the production crash: the per-process spill directory vanishes
+    // (temp-dir cleanup) between spawn and the first overflow; the host must
+    // survive and keep the full output recoverable.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-subprocess-spec-external-'))
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      const result = await finish(spawnSubprocess(
+        spec('for i in $(seq 1 200); do printf "line-%04d\\n" $i; done', { stdoutMaxBytes: 500, stderrMaxBytes: 500 }),
+        { spillDir: dir },
+      ))
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout.truncated).toBe(true)
+      expect(result.stdout.text).toContain('line-0200')
+      expect(result.stdout.spillPath).toBeDefined()
+      expect(readFileSync(result.stdout.spillPath!, 'utf8')).toContain('line-0001')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('OutputCollector', () => {
@@ -611,6 +648,59 @@ describe('OutputCollector', () => {
     expect(failNextUnlink.value).toBe(false)
     expect(collector.finalize().spillPath).toBeUndefined()
     unlinkSync(spillPath)
+  })
+
+  it('recreates a spill directory removed by external cleanup before the first spill', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-subprocess-spec-recreate-'))
+    try {
+      const collector = new OutputCollector(4, 100, 'recreate', dir)
+      rmSync(dir, { recursive: true, force: true })
+      expect(() => { collector.push(Buffer.from('aaaaaaaa')) }).not.toThrow()
+      const out = collector.finalize()
+      expect(out.text).toBe('aaaa')
+      expect(out.truncated).toBe(true)
+      expect(out.spillPath).toBeDefined()
+      expect(readFileSync(out.spillPath!, 'utf8')).toBe('aaaaaaaa')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('degrades to the in-memory tail when the spill file cannot be created even after recreating the directory', () => {
+    const collector = new OutputCollector(4, 100, 'openfail', spillDir)
+    collector.push(Buffer.from('aaaa'))
+    failNextOpen.value = 2
+    expect(() => { collector.push(Buffer.from('bbbb')) }).not.toThrow()
+    expect(failNextOpen.value).toBe(0)
+    const out = collector.finalize()
+    expect(out.text).toBe('bbbb')
+    expect(out.truncated).toBe(true)
+    expect(out.spillPath).toBeUndefined()
+  })
+
+  it('degrades to the in-memory tail when backfilling the spill file fails', () => {
+    const collector = new OutputCollector(4, 100, 'backfill', spillDir)
+    collector.push(Buffer.from('aaaa'))
+    failNextWrite.value = 1
+    expect(() => { collector.push(Buffer.from('bbbb')) }).not.toThrow()
+    expect(failNextWrite.value).toBe(0)
+    const out = collector.finalize()
+    expect(out.text).toBe('bbbb')
+    expect(out.truncated).toBe(true)
+    expect(out.spillPath).toBeUndefined()
+  })
+
+  it('stops advertising a spill file whose write fails mid-stream', () => {
+    const collector = new OutputCollector(4, 100, 'midwrite', spillDir)
+    collector.push(Buffer.from('aaaa'))
+    collector.push(Buffer.from('bbbb'))
+    expect(collector.readFrom(0).spillPath).toBeDefined()
+    failNextWrite.value = 1
+    expect(() => { collector.push(Buffer.from('cccc')) }).not.toThrow()
+    const out = collector.finalize()
+    expect(out.text).toBe('cccc')
+    expect(out.truncated).toBe(true)
+    expect(out.spillPath).toBeUndefined()
   })
 })
 

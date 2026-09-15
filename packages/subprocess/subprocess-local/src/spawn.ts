@@ -11,7 +11,7 @@
 import { type ChildProcess, type SpawnOptions, spawn, spawnSync } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { randomBytes } from 'node:crypto'
-import { closeSync, mkdtempSync, openSync, rmdirSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmdirSync, unlinkSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleepMs } from 'node:timers/promises'
@@ -132,7 +132,10 @@ export function prepareManagedProcessBinding(
  * first overflow a spill file is created and every chunk (including those
  * already collected) is appended there while the full stream remains within
  * the cap; without one, only the in-memory tail is ever retained (the
- * diagnostic-tail shape — a language server's stderr).
+ * diagnostic-tail shape — a language server's stderr). Faults creating or
+ * writing the spill file degrade the stream to the in-memory tail instead of
+ * throwing: spill I/O runs inside a stream 'data' callback where an uncaught
+ * throw would kill the host process, so the spill file stays best-effort.
  *
  * Tail-keep rationale (pi/OpenCode): errors and final results cluster at the
  * end of command output; the spill file covers the head.
@@ -188,6 +191,35 @@ export class OutputCollector {
     }
   }
 
+  /** One spill file path: random name in the private per-process directory. */
+  private newSpillFile(): string {
+    // Random suffix + O_EXCL + no-follow-equivalent ('wx' fails on any
+    // existing path, symlink or not) + owner-only mode: defeats spill-path
+    // prediction and symlink planting in shared tmp dirs.
+    return join(
+      this.spillDir,
+      `dsh-subprocess-${process.pid}-${++spillCounter}-${randomBytes(6).toString('hex')}-${this.label}.log`,
+    )
+  }
+
+  /**
+   * Open a fresh spill file. The per-process private directory can be removed
+   * by external temp-dir cleanup while this process runs; it is random-named
+   * and owner-only, so recreating it once is safe. A second open fault
+   * escapes to the caller, which degrades the stream to the in-memory tail.
+   * @returns the opened file descriptor.
+   */
+  private openSpillFile(): number {
+    this.spillFile = this.newSpillFile()
+    try {
+      return openSync(this.spillFile, 'wx', 0o600)
+    } catch {
+      mkdirSync(this.spillDir, { recursive: true, mode: 0o700 })
+      this.spillFile = this.newSpillFile()
+      return openSync(this.spillFile, 'wx', 0o600)
+    }
+  }
+
   /** Open the spill file lazily and append `chunk` (and any prior chunks once). */
   private spillAll(chunk: Buffer): void {
     if (this.maxSpillBytes !== undefined && this.total > this.maxSpillBytes) {
@@ -195,17 +227,32 @@ export class OutputCollector {
       return
     }
     if (this.spillFd === undefined) {
-      // Random suffix + O_EXCL + no-follow-equivalent ('wx' fails on any
-      // existing path, symlink or not) + owner-only mode: defeats spill-path
-      // prediction and symlink planting in shared tmp dirs.
-      this.spillFile = join(
-        this.spillDir,
-        `dsh-subprocess-${process.pid}-${++spillCounter}-${randomBytes(6).toString('hex')}-${this.label}.log`,
-      )
-      this.spillFd = openSync(this.spillFile, 'wx', 0o600)
-      for (const prior of this.chunks) writeSync(this.spillFd, prior)
+      try {
+        this.spillFd = this.openSpillFile()
+      } catch {
+        // The spill file could not be created even after recreating the
+        // directory (unwritable temp dir, disk fault): keep the in-memory
+        // tail only, which always works, instead of throwing from the
+        // stream 'data' callback and killing the host process.
+        this.discardSpill()
+        return
+      }
+      try {
+        for (const prior of this.chunks) writeSync(this.spillFd, prior)
+      } catch {
+        // A backfill fault leaves the file incomplete; stop advertising it
+        // and keep the in-memory tail (the same rule as a failed write below).
+        this.discardSpill()
+        return
+      }
     }
-    writeSync(this.spillFd, chunk)
+    try {
+      writeSync(this.spillFd, chunk)
+    } catch {
+      // A write fault leaves the file incomplete; stop advertising it (the
+      // same rule as a failed close in seal()) and keep the in-memory tail.
+      this.discardSpill()
+    }
   }
 
   /** Stop spilling and remove the file once it can no longer hold the complete stream. */
