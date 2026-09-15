@@ -126,9 +126,19 @@ export function AppFrame({
   renderSlot,
   t,
 }: AppFrameProps) {
-  const layoutInfo = useStore(state => state.layoutInfo)
+  // Field-level selectors: the frame re-renders only when a geometry fact
+  // it consumes changes. Subscribing to the whole layoutInfo object would
+  // also fire on panelInfo writes (selectPanel), needlessly re-running the
+  // sidebar memo and, in the collapsed rail, flashing the wide layout.
+  const viewport = useStore(state => state.layoutInfo.viewportWidth)
+  const narrowExpanded = useStore(state => state.layoutInfo.narrowExpanded)
+  const sidebarPx = useStore(state => state.layoutInfo.sidebar)
+  const rightbarPx = useStore(state => state.layoutInfo.rightbar)
+  const rightbarShown = useStore(state => state.layoutInfo.rightbarShown)
+  const rightbarTrack = useStore(state => state.layoutInfo.rightbarTrack)
+  const rightbarFullscreen = useStore(state => state.layoutInfo.rightbarFullscreen)
+  const rightbarInstant = useStore(state => state.layoutInfo.rightbarInstant)
   const frameRef = useRef<HTMLDivElement | null>(null)
-  const viewport = layoutInfo.viewportWidth
 
   // Track the frame's own box (not the window): rAF-throttled ResizeObserver.
   useLayoutEffect(() => {
@@ -158,15 +168,15 @@ export function AppFrame({
   }, [actions])
 
   const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
-  const sidebarCollapsed = narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0
+  const sidebarCollapsed = narrow ? !narrowExpanded : sidebarPx === 0
   const sidebarPreference = sidebarCollapsed
     ? 0
-    : layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : layoutInfo.sidebar
-  const rightbarPreference = layoutInfo.rightbar ?? viewport * RIGHTBAR_DEFAULT_RATIO
+    : sidebarPx === 0 ? SIDEBAR_DEFAULT : sidebarPx
+  const rightbarPreference = rightbarPx ?? viewport * RIGHTBAR_DEFAULT_RATIO
   // Opening on a narrow frame collapses the left sidebar. Eligibility must
   // include that space before the occupant's first shown report arrives.
-  const normal = computeColumns(viewport, !layoutInfo.rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference)
-  const cols = computeColumns(viewport, sidebarPreference, layoutInfo.rightbarTrack ? rightbarPreference : 0)
+  const normal = computeColumns(viewport, !rightbarShown && narrow ? 0 : sidebarPreference, rightbarPreference)
+  const cols = computeColumns(viewport, sidebarPreference, rightbarTrack ? rightbarPreference : 0)
   const colsRef = useRef(cols)
   colsRef.current = cols
   const rightbarWidth = useRef(normal.rightbar)
@@ -209,8 +219,8 @@ export function AppFrame({
       }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
-      data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
-      data-rightbar-instant={layoutInfo.rightbarInstant || undefined}
+      data-rightbar-fullscreen={rightbarFullscreen || undefined}
+      data-rightbar-instant={rightbarInstant || undefined}
       data-dragging={dragging || undefined}
     >
       <DocumentTitle
@@ -232,7 +242,7 @@ export function AppFrame({
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
+      {rightbarShown && !rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}
     </div>
