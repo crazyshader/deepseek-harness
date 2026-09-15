@@ -340,8 +340,8 @@ describe('web-app runtime glue', () => {
     await vi.waitFor(() => { expect(audit).toHaveBeenCalledOnce() })
     await Promise.allSettled(audit.mock.results.map(result => result.value as Promise<void>))
     if (announces) {
-      expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
-      expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:4567/?token=test-token')
+      expect(log).toHaveBeenCalledWith('dsh web: http://localhost:4567/?token=test-token')
+      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4567/?token=test-token')
     } else {
       expect(log).not.toHaveBeenCalled()
       expect(openBrowser).not.toHaveBeenCalled()

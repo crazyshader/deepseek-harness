@@ -68,6 +68,16 @@ DSH 服务端的信任围栏（`api-request-trust.ts`）比较 `new URL(origin).
 
 > ⚠️ 这两处容易被遗漏。如果上游更新了这些文件，冲突解决后**务必重新检查**。
 
+### e2e 就绪断言（2 个）
+
+这两个文件跑在 `pnpm run test:e2e` / 真实浏览器冒烟里，**不在 `pnpm run test` 范围**，
+所以合并后全量单测全绿也发现不了它们。合并后必须单独 grep 检查：
+
+| 文件 | 改什么 |
+|---|---|
+| `apps/cli/tests/built-bin.e2e.ts` | 就绪断言 `/^dsh web: http:\/\/127\.0\.0\.1:\d+\/\?token=.../u` → `localhost`（注意：同文件里 `--host 0.0.0.0` 错误提示中的 `127.0.0.1` 是绑定地址建议，不改） |
+| `apps/web/tests/smoke-real.e2e.ts` | `readyUrl` 断言 `/^http:\/\/127\.0\.0\.1:\d+\/\?token=.../u` → `localhost` |
+
 ### 文档（8 个）
 
 | 文件 | 改什么 |
@@ -139,6 +149,19 @@ grep "dsh web:" | grep "localhost"
 ```
 
 ## 应用记录
+
+### 合并 `dsh-v0.1.6-alpha.1`（本次）
+
+- `LOOPBACK_HOST = 'localhost'` 在自动合并中保留，但**解释它为什么不能是 IP 字面量的注释被上游注释覆盖**，
+  已在 `packages/bundle/web-app/src/index.ts` 重新补上（护栏丢了，下次就会有人把它改回去）。
+- 上游在 `packages/bundle/web-app/tests/web-app.spec.ts` 新增了一条 `optional-tool sibling fails` 用例，
+  断言里带回 `127.0.0.1` → 已改 `localhost`。这是本次合并后唯一一个被单测抓到的确定性失败。
+- 上游在 `apps/cli/tests/built-bin.e2e.ts` 新增了一条就绪断言，带回 `127.0.0.1` → 已改 `localhost`。
+- `apps/web/tests/smoke-real.e2e.ts` 的 `readyUrl` 断言在**合并前就是** `127.0.0.1`（本清单此前未覆盖 e2e 文件，
+  属既存遗漏，不是本次合并引入）→ 已一并改为 `localhost`，并把 e2e 一节补进上面的清单。
+- 教训：显示 URL 的断言散布在单测、e2e、快照三类文件里，只跑 `pnpm run test` 覆盖不到后两类。
+
+### 更早的记录
 
 - 上游 pull 后本地修改与最新源码冲突，已 revert 旧改动，并按本文档在最新源码上重新应用。
 - 已修改的 15 个文件与本文档列表一致（核心源码 1、测试 3、就绪检测/CI 脚本 2、文档 8、翻译快照 1）。

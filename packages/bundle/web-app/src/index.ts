@@ -77,6 +77,13 @@ const DSH_WEB_URL = 'DSH_WEB_URL' as const
 
 // Display-only mirror of the webserver schema's loopback host: the address the
 // local URL always prints. Not a source of truth — the schema is.
+// This prints `localhost` rather than the schema's `127.0.0.1` bind address:
+// Chrome strips the port from the Origin header for IP-literal loopback
+// origins, so a page served from `http://127.0.0.1:<port>` sends
+// `Origin: http://127.0.0.1` and fails the trust fence's host comparison in
+// api-request-trust.ts with 403. The `localhost` hostname keeps the port, and
+// isLoopbackHostname() already accepts both spellings. Do not "restore" the IP
+// literal here — the bind address stays 127.0.0.1 in the schema.
 const LOOPBACK_HOST = 'localhost'
 /** The webserver schema's all-interfaces bind literal. */
 const ALL_INTERFACES_HOST = '0.0.0.0'
