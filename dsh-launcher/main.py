@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 
 import plugin_manager as pm
 from config import DEFAULT_PORT, LauncherConfig
-from proc_utils import free_port, kill_process_tree
+from proc_utils import find_pids_on_port, free_port, kill_process_tree
 
 
 @dataclass
@@ -83,10 +83,12 @@ class LauncherWindow(QMainWindow):
         # 插件列表的缓存（刷新按钮状态时避免重复读盘）
         self._latest_plugin_name: str | None = None
         self._snapshot_count = 0
+        # 服务状态缓存：(has_project, installed, built, running_port)
+        self._service_status: tuple[bool, bool, bool, bool] | None = None
 
         self._build_ui()
         self._refresh_plugin_lists()
-        self._refresh_button_states()
+        self._refresh_service_status()
 
     # ---- UI 构建 ----
 
@@ -132,6 +134,10 @@ class LauncherWindow(QMainWindow):
         self.stop_btn = QPushButton("停止")
         self.stop_btn.clicked.connect(self._on_stop)
         ctrl_row.addWidget(self.stop_btn)
+
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.clicked.connect(self._on_refresh)
+        ctrl_row.addWidget(self.refresh_btn)
 
         ctrl_row.addStretch(1)
 
@@ -251,11 +257,15 @@ class LauncherWindow(QMainWindow):
         self.config.project_root = chosen
         self.dir_edit.setText(chosen)
         self.config.save()
-        self._refresh_button_states()
+        self._refresh_service_status()
 
     def _on_port_changed(self, value: int) -> None:
         self.config.port = value
         self.config.save()
+        # 端口是 4 状态信号之一：改端口后同步刷新占用信号与按钮/状态行。
+        # 构造期首次 valueChanged 触发时 _service_status 尚为 None，跳过，由 __init__ 末尾统一探测。
+        if self._service_status is not None:
+            self._refresh_service_status()
 
     def _on_open_web_toggled(self, checked: bool) -> None:
         self.config.open_web_after_start = checked
@@ -328,14 +338,24 @@ class LauncherWindow(QMainWindow):
         self._run_chain("启动", [self._service_step(root)])
 
     def _on_stop(self) -> None:
-        if self.process is None:
-            return
-        self._append_log("[停止] 正在终止进程树...\n")
-        pid = int(self.process.processId())
-        if pid > 0:
-            kill_process_tree(pid)
-        # QProcess 自身也发一个终止信号兜底；退出信号到达后链条自然结束
-        self.process.kill()
+        if self.process is not None:
+            self._append_log("[停止] 正在终止进程树...\n")
+            pid = int(self.process.processId())
+            if pid > 0:
+                kill_process_tree(pid)
+            # QProcess 自身也发一个终止信号兜底；退出信号到达后链条自然结束
+            self.process.kill()
+        else:
+            # 外部进程：通过端口探测并杀掉
+            port = self.port_spin.value()
+            pids = find_pids_on_port(port)
+            if not pids:
+                self._append_log(f"[停止] 端口 {port} 无进程占用，无需停止。\n")
+                return
+            self._append_log(f"[停止] 正在终止外部进程: {', '.join(map(str, pids))}\n")
+            for pid in pids:
+                kill_process_tree(pid)
+            self._refresh_service_status()
 
     # ---- 任务：插件管理（插件页签）----
 
@@ -566,7 +586,7 @@ class LauncherWindow(QMainWindow):
         self.status_label.setText("空闲")
         self.process = None
         self.is_serving = False
-        self._refresh_button_states()
+        self._refresh_service_status()
 
     # ---- 插件列表与按钮状态 ----
 
@@ -588,31 +608,123 @@ class LauncherWindow(QMainWindow):
         self._snapshot_count = len(snaps)
         self._refresh_button_states()
 
+    # ---- 服务状态探测与刷新 ----
+
+    def _detect_service_status(self) -> tuple[bool, bool, bool, bool]:
+        """探测 4 个服务状态信号。
+
+        @returns (has_project, installed, built, running_port)
+        """
+        root = self.config.project_root
+        has_project = bool(root) and (Path(root) / "package.json").is_file()
+        installed = has_project and (Path(root) / "node_modules").is_dir()
+        built = installed and (Path(root) / "apps" / "web" / "dist" / "index.html").is_file()
+        running_port = bool(find_pids_on_port(self.port_spin.value()))
+        return has_project, installed, built, running_port
+
+    def _refresh_service_status(self, log_summary: bool = False) -> None:
+        """完整探测 4 信号，更新缓存，刷新按钮与状态行，可选打日志摘要。
+
+        调用时机：窗口打开、切换项目目录、任务链结束、手动点「刷新」。
+        """
+        self._service_status = self._detect_service_status()
+        self._refresh_button_states()
+        self._update_status_label()
+        if log_summary:
+            self._append_log(self._status_log_line() + "\n")
+
+    def _update_status_label(self) -> None:
+        """根据缓存状态 + 实时进程更新底部状态行文案。"""
+        st = self._service_status
+        if st is None:
+            return
+        _, _, _, running_port = st
+        if self.process is not None and self.is_serving:
+            self.status_label.setText("运行中: 启动")
+        elif self.process is not None:
+            name = self._chain["name"] if self._chain else "任务"
+            self.status_label.setText(f"运行中: {name}")
+        elif running_port:
+            self.status_label.setText("运行中（外部）")
+        elif not st[0]:
+            self.status_label.setText("未选择项目")
+        elif not st[1]:
+            self.status_label.setText("已选项目 · 未安装")
+        elif not st[2]:
+            self.status_label.setText("已安装 · 未构建")
+        else:
+            self.status_label.setText("已构建 · 未运行")
+
+    def _status_log_line(self) -> str:
+        """生成一行状态摘要，用于日志。"""
+        st = self._service_status
+        port = self.port_spin.value()
+        if st is None:
+            return f"端口 {port} 状态未知"
+        has_project, installed, built, running_port = st
+        if self.process is not None and self.is_serving:
+            return f"运行中: 启动 | 端口 {port} 被占用"
+        if self.process is not None:
+            name = self._chain["name"] if self._chain else "任务"
+            return f"运行中: {name} | 端口 {port} {'被占用' if running_port else '空闲'}"
+        if running_port:
+            pids = find_pids_on_port(port)
+            pid_str = ", ".join(map(str, pids)) if pids else "未知"
+            return f"运行中（外部） | 端口 {port} 被占用 (PID {pid_str})"
+        if not has_project:
+            return f"未选择项目 | 端口 {port} 空闲"
+        if not installed:
+            return f"已选项目 · 未安装 | 端口 {port} 空闲"
+        if not built:
+            return f"已安装 · 未构建 | 端口 {port} 空闲"
+        return f"已构建 · 未运行 | 端口 {port} 空闲"
+
+    def _on_refresh(self) -> None:
+        """手动刷新：探测真实状态并在日志打摘要。"""
+        self._refresh_service_status(log_summary=True)
+
     def _refresh_button_states(self) -> None:
-        """按“单任务互斥”规则刷新按钮可用状态（含插件页签）。"""
-        running = self.process is not None
-        has_project = bool(self.config.project_root)
-        # 运行中时，除“停止”外全部置灰
-        self.install_btn.setEnabled(not running and has_project)
-        self.build_btn.setEnabled(not running and has_project)
-        self.start_btn.setEnabled(not running and has_project)
-        self.stop_btn.setEnabled(running)
-        self.browse_btn.setEnabled(not running)
+        """按缓存的 4 信号 + 实时进程状态刷新按钮可用状态（含插件页签）。"""
+        st = self._service_status
+        if st is None:
+            self.install_btn.setEnabled(False)
+            self.build_btn.setEnabled(False)
+            self.start_btn.setEnabled(False)
+            self.stop_btn.setEnabled(self.process is not None)
+            self.browse_btn.setEnabled(self.process is None)
+            self.plugin_refresh_btn.setEnabled(self.process is None)
+            self.plugin_install_btn.setEnabled(False)
+            self.plugin_browse_dir_btn.setEnabled(self.process is None)
+            self.plugin_browse_pkg_btn.setEnabled(self.process is None)
+            self.plugin_uninstall_btn.setEnabled(False)
+            self.plugin_uninstall_restart_btn.setEnabled(False)
+            self.plugin_remove_latest_btn.setEnabled(False)
+            self.snap_rollback_btn.setEnabled(False)
+            self.snap_rollback_latest_btn.setEnabled(False)
+            return
+        has_project, installed, built, running_port = st
+        blocking = self.process is not None
+        running = running_port or self.is_serving
+        self.install_btn.setEnabled(has_project and not blocking)
+        self.build_btn.setEnabled(has_project and installed and not blocking)
+        self.start_btn.setEnabled(has_project and built and not running and not blocking)
+        self.stop_btn.setEnabled(blocking or running_port)
+        self.browse_btn.setEnabled(not blocking)
         # 插件页签
-        self.plugin_refresh_btn.setEnabled(not running)
-        self.plugin_install_btn.setEnabled(not running and has_project)
-        self.plugin_browse_dir_btn.setEnabled(not running)
-        self.plugin_browse_pkg_btn.setEnabled(not running)
+        self.plugin_refresh_btn.setEnabled(not blocking)
+        self.plugin_install_btn.setEnabled(has_project and not blocking)
+        self.plugin_browse_dir_btn.setEnabled(not blocking)
+        self.plugin_browse_pkg_btn.setEnabled(not blocking)
         plugin_selected = self.plugin_list.currentItem() is not None
-        self.plugin_uninstall_btn.setEnabled(not running and has_project and plugin_selected)
-        self.plugin_uninstall_restart_btn.setEnabled(not running and has_project and plugin_selected)
+        self.plugin_uninstall_btn.setEnabled(has_project and plugin_selected and not blocking)
+        self.plugin_uninstall_restart_btn.setEnabled(has_project and plugin_selected and not blocking)
         self.plugin_remove_latest_btn.setEnabled(
-            not running and has_project and self._latest_plugin_name is not None
+            has_project and not blocking and self._latest_plugin_name is not None
         )
         snap_selected = self.snap_list.currentItem() is not None
-        self.snap_rollback_btn.setEnabled(not running and has_project and snap_selected)
+        self.snap_rollback_btn.setEnabled(has_project and snap_selected and not blocking)
         self.snap_rollback_latest_btn.setEnabled(
-            not running and has_project and self._snapshot_count > 0
+            has_project and not blocking and self._snapshot_count > 0
         )
 
     # ---- 日志与状态 ----
