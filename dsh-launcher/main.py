@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +48,65 @@ from PySide6.QtWidgets import (
 
 import plugin_manager as pm
 from config import DEFAULT_PORT, LauncherConfig
-from proc_utils import find_pids_on_port, free_port, kill_process_tree
+from proc_utils import NO_WINDOW, find_pids_on_port, free_port, kill_process_tree
+
+
+def dist_index(root: Path) -> Path:
+    """Web 前端构建产物的入口文件，它的存在与新旧决定「构建」状态。"""
+    return root / "apps" / "web" / "dist" / "index.html"
+
+
+# 影响 Web 前端产物的目录。只看这些路径的最后一次提交时间，而不是整个
+# 仓库的——否则一次纯文档提交也会让产物显示为过期，提示很快就会被无视。
+# 代价是漏报：前端间接依赖的其他包（如 packages/util 下被客户端引用的
+# 工具）单独改动时不会触发提示。宁可漏报也不误报，因为误报会让提示失效。
+_FRONTEND_PATHS = ("apps/web", "packages/client")
+
+
+def _frontend_commit_time(root: Path) -> float | None:
+    """返回最后一次改动 Web 前端相关目录的 git 提交时间（Unix 秒）。
+
+    拿不到就返回 None——不是 git 仓库、git 不在 PATH、仓库还没有提交
+    都算拿不到。调用方必须把 None 当作「无法判断新旧」而不是「已过期」，
+    否则在非 git 的解压目录里会一直误报。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", "--", *_FRONTEND_PATHS],
+            cwd=root,
+            creationflags=NO_WINDOW,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    stamp = result.stdout.strip()
+    return float(stamp) if stamp.isdigit() else None
+
+
+def dist_is_stale(root: Path) -> bool:
+    """判断已有的构建产物是否早于前端代码的最后一次改动。
+
+    合并上游代码后最容易踩的坑：dist 还在，但它是合并前构建的，
+    「启动」按钮照亮，跑起来的是过期前端，而且界面上看不出任何异常。
+    判据是「产物修改时间 vs 前端目录最后一次提交时间」。
+
+    只在能确定过期时返回 True；产物不存在、拿不到提交时间、读不到
+    文件时间一律返回 False，交由调用方按「无法判断」处理。
+    """
+    index = dist_index(root)
+    if not index.is_file():
+        return False
+    changed_at = _frontend_commit_time(root)
+    if changed_at is None:
+        return False
+    try:
+        return index.stat().st_mtime < changed_at
+    except OSError:
+        return False
 
 
 @dataclass
@@ -83,8 +142,8 @@ class LauncherWindow(QMainWindow):
         # 插件列表的缓存（刷新按钮状态时避免重复读盘）
         self._latest_plugin_name: str | None = None
         self._snapshot_count = 0
-        # 服务状态缓存：(has_project, installed, built, running_port)
-        self._service_status: tuple[bool, bool, bool, bool] | None = None
+        # 服务状态缓存：(has_project, installed, built, stale, running_port)
+        self._service_status: tuple[bool, bool, bool, bool, bool] | None = None
 
         self._build_ui()
         self._refresh_plugin_lists()
@@ -332,9 +391,17 @@ class LauncherWindow(QMainWindow):
         if not (root / "node_modules").is_dir():
             self._warn("未找到 node_modules，请先执行“安装”。")
             return
-        if not (root / "apps" / "web" / "dist" / "index.html").is_file():
+        if not dist_index(root).is_file():
             self._warn("Web 前端尚未构建，请先执行“构建”。")
             return
+        # 产物早于当前代码时只提醒、不拦：合并上游代码后最容易在这里
+        # 不知不觉跑起过期前端，但「明知旧、先跑起来看看」也是合理用法。
+        if dist_is_stale(root):
+            self._append_log(
+                "[启动] 注意: Web 前端产物早于当前代码提交，"
+                "很可能是拉取或合并代码后没有重新构建，界面可能不是最新的。"
+                "如需更新请先执行“构建”。\n"
+            )
         self._run_chain("启动", [self._service_step(root)])
 
     def _on_stop(self) -> None:
@@ -610,20 +677,24 @@ class LauncherWindow(QMainWindow):
 
     # ---- 服务状态探测与刷新 ----
 
-    def _detect_service_status(self) -> tuple[bool, bool, bool, bool]:
-        """探测 4 个服务状态信号。
+    def _detect_service_status(self) -> tuple[bool, bool, bool, bool, bool]:
+        """探测 5 个服务状态信号。
 
-        @returns (has_project, installed, built, running_port)
+        stale 只是提醒，不参与「能否启动」的判断：明知产物旧但先跑起来
+        看看是合理用法，拦住反而碍事。
+
+        @returns (has_project, installed, built, stale, running_port)
         """
         root = self.config.project_root
         has_project = bool(root) and (Path(root) / "package.json").is_file()
         installed = has_project and (Path(root) / "node_modules").is_dir()
-        built = installed and (Path(root) / "apps" / "web" / "dist" / "index.html").is_file()
+        built = installed and dist_index(Path(root)).is_file()
+        stale = built and dist_is_stale(Path(root))
         running_port = bool(find_pids_on_port(self.port_spin.value()))
-        return has_project, installed, built, running_port
+        return has_project, installed, built, stale, running_port
 
     def _refresh_service_status(self, log_summary: bool = False) -> None:
-        """完整探测 4 信号，更新缓存，刷新按钮与状态行，可选打日志摘要。
+        """完整探测 5 信号，更新缓存，刷新按钮与状态行，可选打日志摘要。
 
         调用时机：窗口打开、切换项目目录、任务链结束、手动点「刷新」。
         """
@@ -638,7 +709,7 @@ class LauncherWindow(QMainWindow):
         st = self._service_status
         if st is None:
             return
-        _, _, _, running_port = st
+        has_project, installed, built, stale, running_port = st
         if self.process is not None and self.is_serving:
             self.status_label.setText("运行中: 启动")
         elif self.process is not None:
@@ -646,12 +717,14 @@ class LauncherWindow(QMainWindow):
             self.status_label.setText(f"运行中: {name}")
         elif running_port:
             self.status_label.setText("运行中（外部）")
-        elif not st[0]:
+        elif not has_project:
             self.status_label.setText("未选择项目")
-        elif not st[1]:
+        elif not installed:
             self.status_label.setText("已选项目 · 未安装")
-        elif not st[2]:
+        elif not built:
             self.status_label.setText("已安装 · 未构建")
+        elif stale:
+            self.status_label.setText("已构建（早于当前代码）· 未运行")
         else:
             self.status_label.setText("已构建 · 未运行")
 
@@ -661,7 +734,7 @@ class LauncherWindow(QMainWindow):
         port = self.port_spin.value()
         if st is None:
             return f"端口 {port} 状态未知"
-        has_project, installed, built, running_port = st
+        has_project, installed, built, stale, running_port = st
         if self.process is not None and self.is_serving:
             return f"运行中: 启动 | 端口 {port} 被占用"
         if self.process is not None:
@@ -677,6 +750,8 @@ class LauncherWindow(QMainWindow):
             return f"已选项目 · 未安装 | 端口 {port} 空闲"
         if not built:
             return f"已安装 · 未构建 | 端口 {port} 空闲"
+        if stale:
+            return f"已构建（早于当前代码，建议重新构建）· 未运行 | 端口 {port} 空闲"
         return f"已构建 · 未运行 | 端口 {port} 空闲"
 
     def _on_refresh(self) -> None:
@@ -702,7 +777,7 @@ class LauncherWindow(QMainWindow):
             self.snap_rollback_btn.setEnabled(False)
             self.snap_rollback_latest_btn.setEnabled(False)
             return
-        has_project, installed, built, running_port = st
+        has_project, installed, built, _stale, running_port = st
         blocking = self.process is not None
         running = running_port or self.is_serving
         self.install_btn.setEnabled(has_project and not blocking)

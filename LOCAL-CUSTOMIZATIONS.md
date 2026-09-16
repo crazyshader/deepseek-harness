@@ -1,6 +1,6 @@
-# dsh-launcher 分支定制台账
+# dsh-launcher 分支改动清单
 
-> **本文件是本分支相对官方 dsh 的全部定制的唯一事实源。**
+> **本文件记录本分支相对官方 dsh 改了什么，以它为准。**
 >
 > 用途有三个：合并官方代码前知道要保护什么；合并后快速核对有没有被冲掉；以及按清单做功能验证。
 >
@@ -13,8 +13,8 @@
 | 我要做什么 | 看哪里 |
 |---|---|
 | 准备合并官方新版本 | [第一节 合并作业流程](#一合并作业流程) |
-| 想知道本分支到底改了什么 | [第二节 定制台账](#二定制台账) |
-| 合并完了要验证功能 | 台账里每项的「验证」小节 |
+| 想知道本分支到底改了什么 | [第二节 改动清单](#二改动清单) |
+| 合并完了要验证功能 | 清单里每项的「验证」小节 |
 | 想知道上次合并踩了什么坑 | [第三节 合并历史](#三合并历史) |
 
 **一条命令看清全部定制差异**（把 tag 换成当前基线版本）：
@@ -40,14 +40,14 @@ git merge-base HEAD <新tag>
 git rev-list --left-right --count HEAD...<新tag>
 ```
 
-### 2. 发起合并与冲突分流
+### 2. 发起合并，按类型分别处理冲突
 
 ```powershell
 git merge --no-commit --no-ff <新tag>
 git diff --name-only --diff-filter=U   # 列出冲突文件
 ```
 
-冲突**按类型分流，处理方式完全不同**，不要一律手工合并：
+冲突**分几种类型，处理方式完全不同**，不要一律手工合并：
 
 | 冲突类型 | 判别方法 | 处理方式 |
 |---|---|---|
@@ -71,11 +71,11 @@ pnpm run gen-cordis-catalog           # docs/subsystems/ 的生成区域（报 0
 **这一步不能省。** 自动合并「成功」不代表定制还在、更不代表语义还对。
 
 ```powershell
-# 合并结果相对上游 tag 的差异 = 本分支的全部定制。逐项与第二节台账对账
+# 合并结果相对上游 tag 的差异 = 本分支的全部定制。逐项与第二节清单对账
 git diff <新tag> HEAD --stat
 ```
 
-对账要点：台账里每一项的锚点都应该能在这份差异里找到落点。**某项定制凭空消失了，就是被冲掉了。**
+核对要点：清单里每一项的关键名字，都应该能在这份差异里找到对应的改动位置。**某项改动凭空消失了，就是被冲掉了。**
 
 清理上游已删除包的磁盘残留（**必做**，否则会伪装成测试环境问题）：
 
@@ -83,9 +83,9 @@ git diff <新tag> HEAD --stat
 pnpm run clean
 ```
 
-上游删包后，git 会正确删掉跟踪，但 `lib/` 构建产物会留在磁盘上，让 `constraints` 门禁报「这里应该有个包却没有 package.json」，还会让若干测试报出看似无关的模块解析错误。
+上游删包后，git 会正确删掉跟踪，但 `lib/` 构建产物会留在磁盘上，让 `constraints` 检查报「这里应该有个包却没有 package.json」，还会让若干测试报出看似无关的模块解析错误。
 
-### 4. 门禁清单
+### 4. 跑自动检查
 
 按顺序跑，前面的失败先修再往后：
 
@@ -94,7 +94,7 @@ pnpm run typecheck        # 类型层面的定制适配问题
 pnpm run lint
 pnpm run test             # 全量单测。必须用 pnpm run，不能用 npx / pnpm exec（见下方警告）
 pnpm run hygiene          # publint + workspace/package/dependency 检查
-pnpm run doc-sync         # 全部文档门禁（含翻译对、doc budgets、subsystem pages）
+pnpm run doc-sync         # 全部文档检查（含翻译对、doc budgets、subsystem pages）
 pnpm run duplication      # 跨文件克隆检测：验证移植定制时没留下重复副本
 pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了，见下
 ```
@@ -116,21 +116,21 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 5. 逐项功能验证
 
-按第二节台账里每项的「验证」小节执行。**高风险档 5 项都要验**，低风险档不需要。
+按第二节清单里每项的「验证」小节执行。**高风险那 5 项都要验**，低风险的 3 项不用。
 
 ### 6. 回写本文档
 
-合并完成后：在[第三节 合并历史](#三合并历史)加一条记录；台账里凡是路径变了、锚点变了、验证方式变了的，就地订正。
+合并完成后：在[第三节 合并历史](#三合并历史)加一条记录；清单里凡是路径变了、关键名字变了、验证方式变了的，就地订正。
 
 ---
 
-## 二、定制台账
+## 二、改动清单
 
-分档依据是**合并风险**，不是工作量：改了上游文件的项，自动合并会成功但语义可能错；纯新增文件的项，上游根本没机会碰。
+分成两类的依据是**合并时出错的风险**，不是工作量：改了官方文件的项，自动合并会「成功」但含义可能已经错了；只新增文件的项，官方根本没机会碰到。
 
-### 高风险档
+### 高风险改动
 
-5 项，全部修改了上游文件。**每次合并都要逐项核对。**
+5 项，全都改动了官方文件。**每次合并都要逐项核对。**
 
 ---
 
@@ -142,9 +142,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 参考：[Discussion #313](https://github.com/deepseek-ai/deepseek-harness/discussions/313)、[Bug #3106](https://github.com/deepseek-ai/deepseek-harness/discussions/3106)
 
-**代码锚点**（路径可能变动，以锚点为准）
+**代码关键名字**（路径可能变动，以关键名字为准）
 
-| 锚点 | 当前路径 | 说明 |
+| 关键名字 | 当前路径 | 说明 |
 |---|---|---|
 | `LOOPBACK_HOST` | `packages/bundle/web-app/src/index.ts` | 唯一的源头常量，值为 `'localhost'` |
 | 常量上方的护栏注释 | 同上 | 见下方「注释护栏」 |
@@ -207,9 +207,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **为什么**：本地或内网可信环境下（例如经 Tailscale 访问），每次启动都要带 token 的 URL 很不方便。注意这个开关**只关掉 token 交换**，不是关掉全部访问控制 —— 信任围栏和「拒绝 `--host 0.0.0.0`」都还在。
 
-**代码锚点**
+**代码关键名字**
 
-| 锚点 | 当前路径 | 说明 |
+| 关键名字 | 当前路径 | 说明 |
 |---|---|---|
 | `BrowserAuthenticator` | `packages/client/connection/src/browser-auth.ts` | 新增接口，把认证层抽成结构契约 |
 | `NO_AUTH_BROWSER_AUTH` | 同上 | 全部放行的空实现 |
@@ -229,11 +229,11 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | 命令 | 预期证据 | 平台限制 |
 |---|---|---|
 | `pnpm run test packages/client/connection packages/bundle/web-app` | 全绿 | 无 |
-| `pnpm run doc-sync` | `Cordis config` 门禁通过（校验 `cordis.patch.yml` 组合合法） | 无 |
+| `pnpm run doc-sync` | `Cordis config` 检查通过（校验 `cordis.patch.yml` 组合合法） | 无 |
 | 实跑 `pnpm dsh web --no-auth` | 终端出现 `⚠ --no-auth: browser token authentication is disabled`；打印的 URL **不带** `?token=`；直接访问不跳登录 | 需要 key |
 | 实跑不带 `--no-auth` | URL **带** `?token=`（确认默认行为没被改坏） | 需要 key |
 
-**Agent Note**：[`2026-09-02-connection-no-auth-opt-out.zh.md`](.agents/notes/implemented/feature/2026-09-02-connection-no-auth-opt-out.zh.md)（note 若已归档，以本台账为准）
+**Agent Note**：[`2026-09-02-connection-no-auth-opt-out.zh.md`](.agents/notes/implemented/feature/2026-09-02-connection-no-auth-opt-out.zh.md)（note 若已归档，以本清单为准）
 
 ---
 
@@ -243,9 +243,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **为什么**：远程访问（网络较差或经隧道）时，单个 combo 响应体过大会被截断。而 combo 脚本是**全有或全无**的 —— 一个批次就是一个 `<script>`，其中第一处不完整的语句会让同一文件里后续所有插件注册都不执行，整个页面白屏。加了体积上限后，一次截断最多损失一批。
 
-**代码锚点**
+**代码关键名字**
 
-| 锚点 | 当前路径 | 说明 |
+| 关键名字 | 当前路径 | 说明 |
 |---|---|---|
 | `MAX_COMBO_BODY_BYTES = 1024 * 1024` | `packages/client/modules/src/index.ts` | 上限常量 |
 | `comboBodyBytes()` | 同上 | 新增：累加批次内 bundle 字节数 |
@@ -271,9 +271,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **为什么**：PDF.js 的这批资源体积很大，塞进 combo bundle 会直接触发 H3 描述的截断风险（这也是 H3 与 H4 同期出现的原因），而它们只在真正打开 PDF 时才需要。
 
-**代码锚点 —— 通用能力侧**
+**代码关键名字 —— 通用能力侧**
 
-| 锚点 | 当前路径 | 说明 |
+| 关键名字 | 当前路径 | 说明 |
 |---|---|---|
 | `ClientAssetResponse` | `packages/client/modules/src/index.ts` | 资产响应类型（`body` + `contentType`） |
 | `ClientModuleRegistry.assets` | 同上 | 私有 Map，**与 `batchResponses` 分开持有**：后者每次重组被整表替换，资产生命周期属于登记方的 effect |
@@ -282,16 +282,16 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **关键语义**：资产按 **pathname 匹配**，query 串不参与。资产由所属依赖定版、不是内容 revision 定版，所以过期的缓存键**不能变成 404**。合并时若有人「顺手统一」成和 bundle 一样的全 URL 匹配，缓存分离就会退化成 404。
 
-**代码锚点 —— PDF.js 侧**
+**代码关键名字 —— PDF.js 侧**
 
-| 锚点 | 当前路径 | 说明 |
+| 关键名字 | 当前路径 | 说明 |
 |---|---|---|
 | `PDF_ASSET_PACKAGE`、`PDF_ASSET_OUTPUT_DIR`（`'lib/pdfjs-assets'`）、`PDF_ASSET_DIRECTORIES`、`PDF_ASSET_KINDS`、`pdfAssetPath()`、`pdfAssetUrl()` | `packages/client/ui-sidebar-documentpreview/src/pdf-asset-route.ts` | **本分支新增文件**，两侧共享的路径约定 |
 | `ASSET_ROOT`、`ASSET_CONTENT_TYPES` + 读目录注册 | `packages/client/ui-sidebar-documentpreview/src/index.ts` | Host 半侧：目录列表即白名单 |
 | `dsh-pdf-asset-copy` 插件、`pdfAssetManifest()`、`pdfLicenseBanner()`、`__DSH_PDFJS_ASSETS__` | `packages/client/ui-sidebar-documentpreview/tsdown.config.ts` | 构建期复制资源 + 注入清单 + 许可证 banner |
 | 浏览器半侧取 URL 逻辑 | `packages/client/ui-sidebar-documentpreview/src/client/pdf/assets.ts` | |
 
-**三处清单联动**（漏一处则门禁红，且报错信息与本定制看不出关系）
+**还要一起改的三个名单文件**（漏一个就会有检查失败，而且报错信息看不出跟这项改动有关）
 
 | 文件 | 加了什么 |
 |---|---|
@@ -315,7 +315,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | 构建后检查 | `packages/client/ui-sidebar-documentpreview/lib/pdfjs-assets/` 下有 cmaps / standard_fonts / wasm 三类文件 | 需先 `pnpm run build` |
 | Web UI 实测：打开一个 PDF | 正常渲染；Network 面板可见 `/plugins/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/assets/...` 请求返回 200 | 需要 key |
 
-**Agent Note**：[`2026-09-12-pdfjs-assets-out-of-bundle.zh.md`](.agents/notes/implemented/architecture/2026-09-12-pdfjs-assets-out-of-bundle.zh.md)（note 若已归档，以本台账为准）
+**Agent Note**：[`2026-09-12-pdfjs-assets-out-of-bundle.zh.md`](.agents/notes/implemented/architecture/2026-09-12-pdfjs-assets-out-of-bundle.zh.md)（note 若已归档，以本清单为准）
 
 ---
 
@@ -325,9 +325,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **为什么**：长时间运行的宿主（`dsh web`）曾因此崩溃 —— 外部临时目录清理程序删掉了本进程的私有 spill 目录，下一次流溢出时 `openSync` 抛出 ENOENT，而这段代码跑在流的 `'data'` 回调里，**未捕获的异常会直接带走整个宿主进程**。spill 文件只是「完整输出的恢复产物」，值不上拿宿主进程去换。
 
-**代码锚点**（⚠ **这一项的文件路径在上次合并中已经变过一次，务必以锚点为准**）
+**代码关键名字**（⚠ **这一项的文件路径在上次合并中已经变过一次，务必以关键名字为准**）
 
-| 锚点 | 当前路径 | 说明 |
+| 关键名字 | 当前路径 | 说明 |
 |---|---|---|
 | `OutputCollector` | `packages/subprocess/subprocess-local/src/output.ts` | **上游在 0.1.6-alpha.1 把它从 `src/spawn.ts` 整体搬到了这里** |
 | `newSpillFile()` | 同上 | 新增：拆出路径生成 |
@@ -345,13 +345,13 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `pnpm run duplication` | 0 clones（证明移植没留重复实现） | 无 |
 | `pnpm run typecheck` | 通过（Windows 上这是唯一能覆盖该文件的本机手段） | 无 |
 
-**Agent Note**：[`2026-09-15-subprocess-spill-fault-degradation.zh.md`](.agents/notes/implemented/bug-fix/2026-09-15-subprocess-spill-fault-degradation.zh.md)（note 若已归档，以本台账为准）
+**Agent Note**：[`2026-09-15-subprocess-spill-fault-degradation.zh.md`](.agents/notes/implemented/bug-fix/2026-09-15-subprocess-spill-fault-degradation.zh.md)（note 若已归档，以本清单为准）
 
 ---
 
-### 低风险档
+### 低风险改动
 
-3 项，**纯新增文件，上游永远不会碰，不会产生冲突**。合并后无需逐项检查，`git diff <tag> HEAD --stat` 里看到它们还在即可。
+3 项，**都是新增的文件，官方永远不会碰，不会产生冲突**。合并后不用逐项检查，`git diff <tag> HEAD --stat` 里看到它们还在就行。
 
 | 定制 | 文件 | 说明 |
 |---|---|---|
@@ -374,7 +374,18 @@ pnpm dsh web --help          # 应含 --port / --no-open / --no-auth
 pnpm dsh plugin --help       # 应含 --profile
 ```
 
-两个**既存缺陷**（非合并引入，尚未修）：① 判定「已构建」只看 `apps/web/dist/index.html` 是否存在、不比新旧，所以一份过期 dist 也会让「启动」按钮亮起；② `dsh_home()` 不做 `resolve()`、不处理纯空白字符串，与 Node 侧 `resolveDshHome()` 归一化规则不一致，`DSH_HOME` 为相对路径或纯空白时两侧会指向不同 profile 目录。
+**启动器自己也有两处跟合并有关的行为，都已修好**（原先是两个隐患，2026-09-15 修的）：
+
+| 关键名字 | 位置 | 做什么 |
+|---|---|---|
+| `dist_is_stale()`、`_frontend_commit_time()`、`_FRONTEND_PATHS` | `dsh-launcher/main.py` | 检查前端构建产物是不是比前端代码还旧。旧了就在状态栏显示「已构建（早于当前代码）」并在启动时打一行提醒，**但不拦着不让启动** |
+| `dsh_home()` | `dsh-launcher/plugin_manager.py` | 读 `DSH_HOME` 的规则跟 Node 侧 `resolveDshHome()` 对齐：纯空白当没设置、相对路径转成绝对路径 |
+
+为什么要做这两件事：拉取或合并官方代码后，`dist` 还在但已经是旧的，启动器原先只看文件存不存在，「启动」按钮照样亮，跑起来的是过期前端，界面上完全看不出异常。而 `DSH_HOME` 那条，原先纯空白字符串会被当成有效路径、相对路径不转绝对，导致启动器和 dsh **指向不同的 profile 目录**，插件列表、快照、回滚会静默作用在错误位置。
+
+判断产物新旧时只看 `apps/web` 和 `packages/client` 这两个目录的最后提交时间，不看整个仓库。否则一次纯文档提交也会让产物显示过期，提醒很快就会被无视。代价是漏报：前端间接用到的其他包单独改动时不会提醒 —— 宁可漏报也不误报。
+
+拿不到 git 信息时（不是 git 仓库、git 不在 PATH）退回只看文件是否存在，不误报。
 
 ---
 
@@ -409,8 +420,8 @@ pnpm dsh plugin --help       # 应含 --profile
 1. **自动合并成功 ≠ 语义正确。** localhost 定制的核心常量被完好保留、git 毫无怨言，但上游新增的两处断言带回了 `127.0.0.1`，且 `LOOPBACK_HOST` 上方的护栏注释被上游注释覆盖。**值对了、注释没了 —— 没有任何工具会报这种丢失。**
 2. **单测全绿 ≠ 定制完好。** 22684 项单测通过的同时，两处 e2e 就绪断言是错的，因为 e2e 不在 `pnpm run test` 范围内。其中 `apps/web/tests/smoke-real.e2e.ts` 合并前就错了、从未被发现 —— 旧清单只覆盖单测。
 3. **文件级重构伪装成内容冲突。** 上游把 `OutputCollector` 从 `spawn.ts` 搬到 `output.ts`，取任何一侧都错。
-4. **上游删包会留下磁盘残留。** 7 个被删除的包（`code-runtime/code-runtime`、`code-runtime-worker-thread`、`e2b/e2b`、`e2b/fs-e2b`、`e2b/subprocess-e2b`、`experimental/code-runtime-python`、`workflow/workflow-worker-thread`）留下 `lib/` 产物，让 `constraints` 门禁红、并让 `transform-corpus.spec.ts` 报出看似无关的模块解析错误 —— **这一条当时被误判为环境问题，绕了一圈才靠 `pnpm run hygiene` 定位**。`pnpm run clean` 解决。
-5. **只跑 typecheck + lint + test 是不够的。** 第一轮验证漏了 `hygiene`、`doc-sync`、`duplication`、`test:snapshot` 四类门禁，第 4 条那个真实问题就是补跑时才发现的。
+4. **上游删包会留下磁盘残留。** 7 个被删除的包（`code-runtime/code-runtime`、`code-runtime-worker-thread`、`e2b/e2b`、`e2b/fs-e2b`、`e2b/subprocess-e2b`、`experimental/code-runtime-python`、`workflow/workflow-worker-thread`）留下 `lib/` 产物，让 `constraints` 检查红、并让 `transform-corpus.spec.ts` 报出看似无关的模块解析错误 —— **这一条当时被误判为环境问题，绕了一圈才靠 `pnpm run hygiene` 定位**。`pnpm run clean` 解决。
+5. **只跑 typecheck + lint + test 是不够的。** 第一轮验证漏了 `hygiene`、`doc-sync`、`duplication`、`test:snapshot` 四类检查，第 4 条那个真实问题就是补跑时才发现的。
 6. **测试启动方式会造出假失败。** 用 `npx vitest` / `pnpm exec vitest` 导致 `npm_execpath` 指向 npm，`pdf-license-bundle.client.spec.ts` 假失败。
 
 **最终验证状态**：typecheck / lint / doc-sync(41) / duplication / constraints 全过；全量单测 1296/1320 文件通过，剩余失败均为本机环境或并发争用（清单见流程节）。`test:snapshot` **未能验证**（Windows 平台限制）。
@@ -427,12 +438,12 @@ pnpm dsh plugin --help       # 应含 --profile
 
 **新增定制的同时就登记到本文档**，不要等下次合并。理由见 H1 里那条 e2e 遗漏：定制加入的那一刻不登记，之后就再没有自然时机补上了，而合并恰恰是最需要这份清单完整的时刻。
 
-**每次合并后核对并订正**：路径变了、锚点变了、验证方式变了、平台限制变了，就地改。合并历史加一条新记录，旧记录**保持原样不回溯清理** —— 历史记录本身有价值。
+**每次合并后核对并订正**：路径变了、关键名字变了、验证方式变了、平台限制变了，就地改。合并历史加一条新记录，旧记录**保持原样不回溯清理** —— 历史记录本身有价值。
 
-**分档标准**：改了上游文件 → 高风险档，写全套（为什么 / 锚点 / 冲突高发点 / 验证）；纯新增文件 → 低风险档，简表一行。判据是**合并风险**，不是工作量。
+**怎么分类**：改了官方文件 → 归到高风险，写全套（为什么 / 关键名字 / 合并时最容易出错的地方 / 验证）；只新增文件 → 归到低风险，表格里一行就够。依据是**合并时出错的风险**，不是工作量。
 
-**锚点优先于路径**：符号名比文件路径稳定得多。0.1.6-alpha.1 这一次，`LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`registerAssets`、`NO_AUTH_BROWSER_AUTH`、`OutputCollector` 跨 800 个上游提交全部存活，而文件路径已经变了一个。
+**关键名字优先于路径**：符号名比文件路径稳定得多。0.1.6-alpha.1 这一次，`LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`registerAssets`、`NO_AUTH_BROWSER_AUTH`、`OutputCollector` 跨 800 个上游提交全部存活，而文件路径已经变了一个。
 
 **不贴大段 diff**：代码片段会过期，而且看起来很权威，比没有更危险。例外是「定制本身就是那一小段文本」的情况，比如 H1 的注释护栏。
 
-**与 Agent Note 的分工**：note 记「为什么这么设计、考虑过哪些替代方案」，本台账记「是什么、在哪、怎么验」。note 可能被归档冻结，**冲突时以本台账为准**。
+**与 Agent Note 的分工**：note 记「为什么这么设计、考虑过哪些替代方案」，本清单记「是什么、在哪、怎么验」。note 可能被归档冻结，**冲突时以本清单为准**。

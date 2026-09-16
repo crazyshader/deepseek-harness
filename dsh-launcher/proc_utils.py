@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import subprocess
 
-# 无窗口执行子命令，避免打包成 --windowed 后弹出黑框
-_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+# 无窗口执行子命令，避免打包成 --windowed 后弹出黑框。
+# 公开给同项目其他模块复用，避免这个魔数在多处重写。
+NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 
 
 def kill_process_tree(pid: int) -> None:
@@ -25,7 +26,7 @@ def kill_process_tree(pid: int) -> None:
         return
     subprocess.run(
         ["taskkill", "/PID", str(pid), "/T", "/F"],
-        creationflags=_NO_WINDOW,
+        creationflags=NO_WINDOW,
         capture_output=True,
     )
 
@@ -38,7 +39,7 @@ def find_pids_on_port(port: int) -> list[int]:
     """
     result = subprocess.run(
         ["netstat", "-ano", "-p", "TCP"],
-        creationflags=_NO_WINDOW,
+        creationflags=NO_WINDOW,
         capture_output=True,
         text=True,
     )
