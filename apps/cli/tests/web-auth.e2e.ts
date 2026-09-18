@@ -161,7 +161,7 @@ describe('dsh web authentication through the real CLI', () => {
     try {
       first = await startWeb(root, dshHome, port)
       const firstUrl = new URL(first.launchUrl)
-      expect(firstUrl.origin).toBe(`http://127.0.0.1:${String(port)}`)
+      expect(firstUrl.origin).toBe(`http://localhost:${String(port)}`)
       expect(firstUrl.pathname).toBe('/')
       expect(firstUrl.searchParams.get('token')).toMatch(/^[A-Za-z0-9_-]{43}$/u)
 

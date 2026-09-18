@@ -1,6 +1,6 @@
 /** Node-half composition diagnostics for package metadata and built client bundles. */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { SourceMap } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -20,6 +20,7 @@ const UI_RENDERER_ID = '@deepseek-ai/dsh-client-ui-renderer'
 const comboUrl = (ids: readonly string[], rev: string): string =>
   `/plugins/??${ids.map(id => `${id}/client.js`).join(',')}&rev=${rev}`
 const mapUrl = (url: string): string => url.replace(/\/client\.js(?=,|&rev=)/g, '/client.js.map')
+const chunkUrl = (id: string, fileName: string, rev: string): string => `/plugins/${id}/${fileName}?rev=${rev}`
 const BOOTSTRAP_URL = comboUrl([MODULES_ID], 'boot')
 const APPLICATION_URL = comboUrl([UI_RENDERER_ID], 'app')
 
@@ -52,7 +53,7 @@ it.each([false, true])('tracks the Web carrier lifetime when server-first is %s'
   const modules = await ctx.plugin(ClientModuleRegistry)
   const service = ctx.get('clientModules')!
   expect(service.graph().entries).toEqual([])
-  expect(service.fetchBundle(new Request('http://localhost/plugins/missing')).status).toBe(404)
+  expect((await service.fetchBundle(new Request('http://localhost/plugins/missing'))).status).toBe(404)
   if (!serverFirst) {
     expect(routes.size).toBe(0)
     server = await mountServer()
@@ -61,7 +62,7 @@ it.each([false, true])('tracks the Web carrier lifetime when server-first is %s'
   await server!.dispose()
   await expect.poll(() => routes.size).toBe(0)
   expect(modules.state).toBe(FiberState.ACTIVE)
-  expect(service.fetchBundle(new Request('http://localhost/plugins/missing')).status).toBe(404)
+  expect((await service.fetchBundle(new Request('http://localhost/plugins/missing'))).status).toBe(404)
   await mountServer()
   await expect.poll(() => routes.size).toBe(1)
   await modules.dispose()
@@ -507,6 +508,92 @@ describe('client bundle activation', () => {
 
     writeFileSync(`${clientPath}.map`, '{"version":3,"sources":[null]}\n')
     expect(() => construct([packageName])).not.toThrow()
+
+    writeFileSync(`${clientPath}.map`, JSON.stringify({
+      version: 3,
+      names: [],
+      mappings: 'AAAA',
+      sourceRoot: 'http://[',
+      sources: ['src/index.ts'],
+    }))
+    const invalidUrl = constructWithRoute([packageName])
+    const invalidMapUrl = mapUrl(invalidUrl.service.graph().batches[0]!.url)
+    expect(JSON.parse((await routeRequest(invalidUrl.route, invalidMapUrl)).body.toString('utf8'))).toMatchObject({
+      sections: [{ map: { sources: [`/plugins/${packageName}/client.js`] } }],
+    })
+  })
+
+  it('reads a source map only on its first map GET', async () => {
+    const packageName = '@fixture/lazy-source-map'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n//# sourceMappingURL=client.js.map')
+    writeFileSync(`${clientPath}.map`, '{')
+    const { service, route } = constructWithRoute([packageName])
+    const batch = service.graph().batches[0]!
+    const sourceMapUrl = mapUrl(batch.url)
+
+    const script = await routeRequest(route, batch.url)
+    expect(script.status).toBe(200)
+    expect((await routeRequest(route, sourceMapUrl, 'HEAD')).body).toHaveLength(0)
+    writeFileSync(`${clientPath}.map`, JSON.stringify({
+      version: 3,
+      names: [],
+      mappings: 'AAAA',
+      sources: ['src/first.ts'],
+    }))
+    const first = await routeRequest(route, sourceMapUrl)
+    expect(JSON.parse(first.body.toString('utf8'))).toMatchObject({
+      sections: [{ map: { sources: [`/plugins/${packageName}/src/first.ts`] } }],
+    })
+
+    writeFileSync(`${clientPath}.map`, JSON.stringify({
+      version: 3,
+      names: [],
+      mappings: 'AAAA',
+      sources: ['src/second.ts'],
+    }))
+    expect((await routeRequest(route, sourceMapUrl)).body).toEqual(first.body)
+    expect((await routeRequest(route, batch.url)).body).toEqual(script.body)
+  })
+
+  it('retains a materialized resource when an unrelated row recomposes the graph', async () => {
+    const stablePackage = '@fixture/stable-source-map'
+    const rebuiltPackage = '@fixture/rebuilt-neighbor'
+    const stablePath = writePackage(stablePackage)
+    const rebuiltPath = writePackage(rebuiltPackage)
+    for (const clientPath of [stablePath, rebuiltPath]) {
+      mkdirSync(dirname(clientPath), { recursive: true })
+      writeFileSync(clientPath, 'module.exports = {}\n//# sourceMappingURL=client.js.map')
+      writeFileSync(`${clientPath}.map`, JSON.stringify({
+        version: 3,
+        names: [],
+        mappings: 'AAAA',
+        sources: ['src/first.ts'],
+      }))
+    }
+    const { service, route } = constructWithRoute([stablePackage, rebuiltPackage])
+    const stableUrl = service.graph().entries.find(entry => entry.id === stablePackage)!.url
+    const stableMapUrl = mapUrl(stableUrl)
+    const first = await routeRequest(route, stableMapUrl)
+    const stableChunkPath = join(dirname(stablePath), 'client.stable.js')
+    writeFileSync(stableChunkPath, 'module.exports = { generation: 1 }\n')
+    const stableRow = service.graph().entries.find(entry => entry.id === stablePackage)!
+    const stableChunkUrl = chunkUrl(stablePackage, 'client.stable.js', stableRow.rev)
+    const firstChunk = await routeRequest(route, stableChunkUrl)
+
+    writeFileSync(`${stablePath}.map`, JSON.stringify({
+      version: 3,
+      names: [],
+      mappings: 'AAAA',
+      sources: ['src/second.ts'],
+    }))
+    writeFileSync(stableChunkPath, 'module.exports = { generation: 2 }\n')
+    writeFileSync(rebuiltPath, 'module.exports = { rebuilt: true }\n')
+    service.rebuilt(rebuiltPackage)
+
+    expect((await routeRequest(route, stableMapUrl)).body).toEqual(first.body)
+    expect((await routeRequest(route, stableChunkUrl)).body).toEqual(firstChunk.body)
   })
 
   it('maps packed combo sections back to each generated client bundle', async () => {
@@ -633,71 +720,6 @@ describe('client bundle activation', () => {
     }
   })
 
-  it('serves package assets through every carrier, keyed by path alone', async () => {
-    const packageName = '@fixture/asset-owner'
-    const clientPath = writePackage(packageName)
-    mkdirSync(dirname(clientPath), { recursive: true })
-    writeFileSync(clientPath, 'module.exports = {}\n')
-    const { service, route } = constructWithRoute([packageName])
-
-    const dispose = service.registerAssets(packageName, new Map([
-      ['cmaps/78-EUC-H.bcmap', { body: Buffer.from([1, 2, 3]), contentType: 'application/octet-stream' }],
-      ['wasm/openjpeg.wasm', { body: Buffer.from([0, 97, 115, 109]), contentType: 'application/wasm' }],
-    ]))
-    const base = `/plugins/${packageName}/assets`
-
-    const asset = await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`)
-    expect(asset.status).toBe(200)
-    expect([...asset.body]).toEqual([1, 2, 3])
-    expect(asset.headers?.['content-type']).toBe('application/octet-stream')
-    expect(asset.headers?.['cache-control']).toBe('public, max-age=31536000, immutable')
-
-    // The version query is a cache key, not part of the identity: any value
-    // reaches the same bytes, so a stale key cannot 404 a working PDF.
-    expect([...(await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap?v=6.3.289`)).body]).toEqual([1, 2, 3])
-    expect([...(await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap?v=stale`)).body]).toEqual([1, 2, 3])
-
-    expect((await routeRequest(route, `${base}/wasm/openjpeg.wasm`)).headers?.['content-type'])
-      .toBe('application/wasm')
-    expect((await routeRequest(route, `${base}/cmaps/absent.bcmap`)).status).toBe(404)
-    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`, 'POST')).status).toBe(405)
-    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`, 'HEAD')).body).toHaveLength(0)
-
-    // The shell carrier (Electron, which disables the web server) answers the
-    // same paths through fetchBundle.
-    const shell = service.fetchBundle(new Request(`dsh-app://app${base}/wasm/openjpeg.wasm`))
-    expect(shell.status).toBe(200)
-    expect([...new Uint8Array(await shell.arrayBuffer())]).toEqual([0, 97, 115, 109])
-
-    // A graph recomposition replaces the bundle response tables; assets outlive it.
-    service.rebuilt(packageName)
-    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`)).status).toBe(200)
-
-    dispose()
-    expect((await routeRequest(route, `${base}/cmaps/78-EUC-H.bcmap`)).status).toBe(404)
-    expect((await routeRequest(route, `${base}/wasm/openjpeg.wasm`)).status).toBe(404)
-  })
-
-  it('rejects a duplicate asset path without retaining the partial registration', async () => {
-    const packageName = '@fixture/asset-duplicate'
-    const clientPath = writePackage(packageName)
-    mkdirSync(dirname(clientPath), { recursive: true })
-    writeFileSync(clientPath, 'module.exports = {}\n')
-    const { service, route } = constructWithRoute([packageName])
-    const body = { body: Buffer.from([7]), contentType: 'application/octet-stream' }
-
-    const dispose = service.registerAssets(packageName, new Map([['cmaps/a.bcmap', body]]))
-    expect(() => service.registerAssets(packageName, new Map([
-      ['cmaps/b.bcmap', body],
-      ['cmaps/a.bcmap', body],
-    ]))).toThrow('duplicate asset path')
-    // The failed call must leave nothing behind, including the path it did apply
-    // before reaching the conflict.
-    expect((await routeRequest(route, `/plugins/${packageName}/assets/cmaps/b.bcmap`)).status).toBe(404)
-    expect((await routeRequest(route, `/plugins/${packageName}/assets/cmaps/a.bcmap`)).status).toBe(200)
-    dispose()
-  })
-
   it('splits startup combos before the served body exceeds 1 MiB', async () => {
     const packageNames = ['@fixture/body-first', '@fixture/body-second', '@fixture/body-third']
     // Three artifacts of 400 KiB: the first two fit one batch, the third does not.
@@ -775,7 +797,7 @@ describe('client bundle activation', () => {
     expect(batchScript.status).toBe(200)
     expect(batchScript.headers?.['cache-control']).toBe('public, max-age=31536000, immutable')
     expect(batchScript.body.toString('utf8')).toContain(`//# sourceMappingURL=${mapUrl(batch.url)}`)
-    const shellResponse = service.fetchBundle(new Request(`dsh-app://app${batch.url}`))
+    const shellResponse = await service.fetchBundle(new Request(`dsh-app://app${batch.url}`))
     expect(shellResponse.status).toBe(200)
     expect(shellResponse.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
     expect(await shellResponse.text()).toBe(batchScript.body.toString('utf8'))
@@ -806,6 +828,56 @@ describe('client bundle activation', () => {
     expect(JSON.parse(nextMap.body.toString('utf8'))).toMatchObject({
       sections: [{ map: { sources: ['/plugins/@fixture/source-map/src/changed.tsx'] } }],
     })
+  })
+
+  it('serves a package-local chunk only after its versioned URL is requested', async () => {
+    const packageName = '@fixture/chunked'
+    const clientPath = writePackage(packageName)
+    const chunkPath = join(dirname(clientPath), 'client.terminal.js')
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = { load: () => require.async("./client.terminal.js") }\n')
+    const { service, route } = constructWithRoute([packageName])
+    const row = service.graph().entries[0]!
+
+    const startup = await routeRequest(route, row.url)
+    expect(startup.status).toBe(200)
+    expect(startup.body.toString('utf8')).not.toContain('terminal loaded')
+    expect((await routeRequest(route, chunkUrl(packageName, 'client.terminal.js', row.rev))).status).toBe(404)
+
+    writeFileSync(chunkPath, 'module.exports = { marker: "terminal loaded" }\n')
+    const url = chunkUrl(packageName, 'client.terminal.js', row.rev)
+    const head = await routeRequest(route, url, 'HEAD')
+    expect(head.status).toBe(200)
+    expect(head.body).toHaveLength(0)
+    const chunk = await routeRequest(route, url)
+    expect(chunk.status).toBe(200)
+    expect(chunk.body.toString('utf8')).toContain('terminal loaded')
+    expect(chunk.body.toString('utf8')).toContain(`sourceMappingURL=${url.replace('.js?', '.js.map?')}`)
+    expect((await routeRequest(route, url.replace('.js?', '.js.map?'))).status).toBe(200)
+    expect((await routeRequest(route, url.replace(`rev=${row.rev}`, 'rev=stale'))).status).toBe(404)
+  })
+
+  it('publishes a new chunk revision when a completed build rewrites only the entry timestamp', async () => {
+    const packageName = '@fixture/chunk-only-rebuild'
+    const clientPath = writePackage(packageName)
+    const chunkPath = join(dirname(clientPath), 'client.terminal.js')
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = { load: () => require.async("./client.terminal.js") }\n')
+    writeFileSync(chunkPath, 'module.exports = { generation: 1 }\n')
+    const { service, route } = constructWithRoute([packageName])
+    const firstRow = service.graph().entries[0]!
+    const firstUrl = chunkUrl(packageName, 'client.terminal.js', firstRow.rev)
+    expect((await routeRequest(route, firstUrl)).body.toString('utf8')).toContain('generation: 1')
+
+    writeFileSync(chunkPath, 'module.exports = { generation: 2 }\n')
+    const entryStat = statSync(clientPath)
+    const completed = new Date(entryStat.mtimeMs + 1_000)
+    utimesSync(clientPath, entryStat.atime, completed)
+    const nextRev = service.rebuilt(packageName)!
+    expect(nextRev).not.toBe(firstRow.rev)
+    expect((await routeRequest(route, firstUrl)).status).toBe(404)
+    const nextUrl = chunkUrl(packageName, 'client.terminal.js', nextRev)
+    expect((await routeRequest(route, nextUrl)).body.toString('utf8')).toContain('generation: 2')
   })
 
   it('applies sourceRoot before relocating absolute-looking section sources', async () => {

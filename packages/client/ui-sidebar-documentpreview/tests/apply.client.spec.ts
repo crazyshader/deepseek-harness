@@ -7,15 +7,12 @@
  * and face — and that every registration is gone after dispose, which is what
  * makes a reload safe.
  */
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SidebarRightTabRegistry } from '@deepseek-ai/dsh-client-ui-sidebar-right/src/client/tab-registry.ts'
 import { TEXTPREVIEW_ID, TEXTPREVIEW_KIND } from '../src/client/definition.ts'
 import { apply, inject } from '../src/client/index.ts'
-import { apply as hostApply, inject as hostInject } from '../src/index.ts'
-import { PDF_ASSET_OUTPUT_DIR } from '../src/pdf-asset-route.ts'
+import { OfficeBody } from '../src/client/office/OfficeBody.tsx'
 import { TextPreview } from '../src/client/TextPreview.tsx'
 import { TextTitle } from '../src/client/TextTitle.tsx'
 import { TextBody } from '../src/client/text/TextBody.tsx'
@@ -26,10 +23,11 @@ import { HtmlBody } from '../src/client/html/HtmlBody.tsx'
 import { HTML_BODY_ID } from '../src/client/html/index.ts'
 import { ImageBody } from '../src/client/image/ImageBody.tsx'
 import { IMAGE_BODY_ID } from '../src/client/image/index.ts'
-import { PdfBody } from '../src/client/pdf/PdfBody.tsx'
+import { LazyPdfBody } from '../src/client/pdf/LazyPdfBody.tsx'
 import { PDF_BODY_ID } from '../src/client/pdf/index.ts'
 import { CodeBody } from '../src/client/code/CodeBody.tsx'
 import { en, zh } from '../src/client/locales.ts'
+import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { textFace } from '../src/client/face.ts'
 import type { TextStore } from '../src/client/store.ts'
 import { FILE, SESSION, TAB_ID, page } from './fixtures.client.ts'
@@ -80,46 +78,7 @@ async function boot() {
   return { tabs, registered, dictionaries, fiber, workspaceFiles }
 }
 
-describe('ui-sidebar-documentpreview host half', () => {
-  it('publishes the PDF.js resources and takes them back on disposal', async () => {
-    const ctx = new Context()
-    const registered = new Map<string, { body: Buffer; contentType: string }>()
-    let disposed = false
-    ctx.provide('clientModules', {
-      registerAssets: vi.fn((id: string, assets: ReadonlyMap<string, { body: Buffer; contentType: string }>) => {
-        expect(id).toBe('@deepseek-ai/dsh-client-ui-sidebar-documentpreview')
-        for (const [path, response] of assets) registered.set(path, response)
-        return () => { disposed = true }
-      }),
-    } as never)
-    const fiber = ctx.plugin({ inject: [...hostInject], apply: hostApply })
-    await fiber.await()
-
-    // Every request kind reaches its own directory, and PDF.js addresses these
-    // by exact filename, so the served paths must be the real ones.
-    expect(registered.has('cmaps/78-EUC-H.bcmap')).toBe(true)
-    expect(registered.has('standard_fonts/FoxitSerif.pfb')).toBe(true)
-    expect(registered.has('standard_fonts/LiberationSans-Regular.ttf')).toBe(true)
-    expect(registered.get('wasm/openjpeg.wasm')?.contentType).toBe('application/wasm')
-    // The wasm directory also ships plain-JS fallbacks; they are opaque bytes to
-    // PDF.js, which reads every one of these through the same factory.
-    expect(registered.get('wasm/openjpeg_nowasm_fallback.js')?.contentType).toBe('application/octet-stream')
-    expect(registered.get('cmaps/78-EUC-H.bcmap')?.contentType).toBe('application/octet-stream')
-    // Licenses are disclosed in the bundle banner; serving them as assets would
-    // put the same text in two places.
-    expect([...registered.keys()].filter(path => path.includes('LICENSE'))).toEqual([])
-    // The served bytes are the build's own copy, byte for byte — the host reads
-    // this package, never a runtime-resolved pdfjs-dist.
-    expect(registered.get('wasm/openjpeg.wasm')?.body)
-      .toEqual(readFileSync(join(import.meta.dirname, '..', PDF_ASSET_OUTPUT_DIR, 'wasm/openjpeg.wasm')))
-
-    await fiber.dispose()
-    expect(disposed).toBe(true)
-  })
-})
-
 describe('ui-sidebar-documentpreview apply', () => {
-
   it('registers the type, its dictionaries, and the body and title seats under the type\'s id, the body with a store and a face', async () => {
     const { tabs, registered, dictionaries } = await boot()
     expect(tabs.get(TEXTPREVIEW_KIND)?.priority).toBe('fallback')
@@ -134,8 +93,10 @@ describe('ui-sidebar-documentpreview apply', () => {
       ['sidebar.right.tab.document', MARKDOWN_BODY_ID, 'documentMarkdown', MarkdownBody],
       ['sidebar.right.tab.document', HTML_BODY_ID, 'documentHtml', HtmlBody],
       ['sidebar.right.tab.document', IMAGE_BODY_ID, 'sidebarImage', ImageBody],
-      ['sidebar.right.tab.document', PDF_BODY_ID, 'sidebarPdf', PdfBody],
+      ['sidebar.right.tab.document', PDF_BODY_ID, 'sidebarPdf', LazyPdfBody],
       ['sidebar.right.tab.document', '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/code', 'sidebarCodePreview', CodeBody],
+      ['sidebar.right.tab.document', '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/office', 'sidebarOffice', OfficeBody],
+      ['sidebar.right.tab.document.office.pdf', '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/office', 'sidebarPdf', LazyPdfBody],
     ])
     expect(registered[0]?.store).toBeDefined()
     expect(typeof registered[0]?.inject).toBe('function')
@@ -163,7 +124,12 @@ describe('ui-sidebar-documentpreview apply', () => {
     expect(instance.getSnapshot().byTab[TAB_ID]?.pages[1]?.text).toBe('first')
     face.loadAll(TAB_ID, FILE, controller.signal, 'v1')
     await workspaceFiles.readAll.mock.results[0]?.value
-    expect(workspaceFiles.readAll).toHaveBeenCalledExactlyOnceWith(FILE.sessionId, FILE.path, controller.signal)
-    expect(instance.getSnapshot().byTab[TAB_ID]?.complete?.data).toEqual(new Uint8Array([0, 1, 255]))
+    expect(workspaceFiles.readAll).toHaveBeenCalledExactlyOnceWith(FILE.sessionId, FILE.path, expect.any(AbortSignal))
+    await expect.poll(() => instance.getSnapshot().byTab[TAB_ID]?.complete?.data).toEqual(new Uint8Array([0, 1, 255]))
+    const failure = new RemoteError('workspace-file/not-found', 'File missing', { path: FILE.path })
+    workspaceFiles.readAll.mockResolvedValueOnce({ ok: false, error: failure })
+    face.reloadAll(TAB_ID, FILE, controller.signal, 'v2')
+    await expect.poll(() => instance.getSnapshot().byTab[TAB_ID]?.failure).toBe(failure)
+    expect(instance.getSnapshot().byTab[TAB_ID]?.complete).toBeUndefined()
   })
 })

@@ -20,7 +20,7 @@
 **一条命令看清全部定制差异**（把 tag 换成当前基线版本）：
 
 ```powershell
-git diff dsh-v0.1.6-alpha.1 HEAD --stat
+git diff dsh-v0.1.6-alpha.2 HEAD --stat
 ```
 
 这条命令是本文档最重要的工具。它以 tag 为基准，永远不会过期 —— 手写的文件清单会过期，它不会。合并后用它核对，比人工比对几百个文件快几个数量级。
@@ -62,7 +62,10 @@ git diff --name-only --diff-filter=U   # 列出冲突文件
 pnpm run gen-cordis-api               # packages/extensions/tool-cordis/src/api-catalog.ts
 pnpm run gen-cordis-inspect-catalog   # packages/extensions/cordis-client-runner/src/client/api-catalog.ts
 pnpm run gen-cordis-catalog           # docs/subsystems/ 的生成区域（报 0 written 即已新鲜）
+pnpm run gen-config-catalog           # docs/config-catalog.md（H2 的 noAuth 会出现在这里）
 ```
+
+> **`docs/config-catalog.md` 是生成物，但它的 `.zh.md` 不是。** 生成器只写英文侧，中文侧靠翻译对流程跟上。H2 的 `noAuth` 条目在中文侧是同一份英文 JSDoc（生成的代码块不翻译），取上游后要手工补回去再重录哈希 —— dsh-v0.1.6-alpha.2 这次就漏过一轮，靠 `doc-sync` 的 `config catalog` 关卡抓到。
 
 > **文件级重构是最危险的一类**，因为 git 只会告诉你「有冲突」，不会告诉你「上游把这段代码搬到别处去了」。取任何一侧都错：取我们这侧会留下一份重复实现，取上游那侧会静默丢掉定制。dsh-v0.1.6-alpha.1 这次就发生了一起，见 [H5](#h5-subprocess-spill-文件容错降级)。
 
@@ -99,6 +102,8 @@ pnpm run duplication      # 跨文件克隆检测：验证移植定制时没留�
 pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了，见下
 ```
 
+> **`hygiene` 里有两项要先 `pnpm run build` 才能过**：`publint` 与 `built package invariants` 都消费 `lib/` 产物，而流程第 3 步的 `pnpm run clean` 刚把它们删掉。顺序是 `clean` → 生成器 → `typecheck`/`lint`/`test` → `build` → `hygiene`。（旧版本清单把 publint 全局失败记成 Windows glob 问题，dsh-v0.1.6-alpha.2 实测：build 之后 16 项全过，那条已订正。）
+
 > **必须用 `pnpm run test` 启动测试。** 用 `npx vitest` 或 `pnpm exec vitest` 会让 `npm_execpath` 指向错误的包管理器，部分测试（如 `pdf-license-bundle.client.spec.ts`）会因此假失败，白白耗掉排查时间。
 
 > **Windows 本机跑不到的验证：**`pnpm run test:snapshot` 的期望 fixture 含 POSIX 专有的 `bash` 工具，Windows 上运行时不加载它，112 项必然全红 —— 这不是回归，但意味着**模型可见输出的验证在 Windows 上做不到**，必须靠 CI 或 Linux/macOS。同理 `packages/subprocess/subprocess-local/tests/spawn.spec.ts` 在 win32 被 `vitest.config.ts` 显式排除。
@@ -107,16 +112,16 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 | 失败项 | 原因 |
 |---|---|
-| `sandbox-windows-acl`、`pwsh-sandbox`、`tool-pwsh-persistent` | 本机未安装 PowerShell 7（`pwsh`） |
+| `sandbox-windows-acl`、`pwsh-sandbox`、`tool-pwsh-persistent`、`apps/desktop/upload-with-credentials` | 本机未安装 PowerShell 7（`pwsh`）。最后一项的表现是 `expected 'string' to be 'number'` —— `execFile('pwsh')` 抛 `code: 'ENOENT'`，看不出跟 pwsh 有关 |
 | `llm-retry/transport-recovery` | 需要真实 API key |
-| `publint`（全部包报 `exports["./src/*"]` 不匹配） | Windows glob 行为，`src/` 实际有文件 |
+| `deliverables/workspace-changes` 里 2 个 5 秒超时 | 本机 git 在 Windows 上太慢。**串行单跑仍失败**，但它是纯上游文件，不是回归 |
 | `scripts/build-exe-for-python-sdk` | 本机 node 装在含空格路径（`C:\Program Files\nodejs`） |
 | `scripts/client-build-environment` | 5 秒超时对本机 git fixture 不够 |
-| 大批测试文件随机失败、集合每轮不同 | 并发资源争用。**串行单跑一遍确认**，别当回归 |
+| 大批测试文件随机失败、集合每轮不同 | 并发资源争用。**串行单跑一遍确认**，别当回归。dsh-v0.1.6-alpha.2 这次两轮全量分别报 28 和 33 个失败，串行复核后只剩上表几项 |
 
 ### 5. 逐项功能验证
 
-按第二节清单里每项的「验证」小节执行。**高风险那 5 项都要验**，低风险的 3 项不用。
+按第二节清单里每项的「验证」小节执行。**高风险那 4 项都要验**，低风险的 3 项不用。
 
 ### 6. 回写本文档
 
@@ -130,7 +135,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 高风险改动
 
-5 项，全都改动了官方文件。**每次合并都要逐项核对。**
+4 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H5 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
 
 ---
 
@@ -166,11 +171,13 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | 源码（1） | `packages/bundle/web-app/src/index.ts` |
 | 单测（2） | `packages/bundle/web-app/tests/web-app.spec.ts`（约 17 处）、`tests/browser-open.spec.ts` |
 | 就绪检测（2） | `apps/cli/tests/lazy-search-startup.compat.spec.ts`（2 处正则）、`scripts/publish-npm-baseline.ts`（Python 探针字节串） |
-| **e2e（2）** | `apps/cli/tests/built-bin.e2e.ts`、`apps/web/tests/smoke-real.e2e.ts` |
+| **e2e（3）** | `apps/cli/tests/built-bin.e2e.ts`、`apps/web/tests/smoke-real.e2e.ts`、`apps/cli/tests/web-auth.e2e.ts` |
 | 快照（3） | `apps/cli/tests/web-browser-open.expected.e2e.ts`、`scripts/snapshots/translation-prompt-v4/request-response.expected.json`、`scripts/fixtures/translation-prompt/examples/product.{md,zh.md}` |
 | 文档（8+4） | `README.md/.zh.md`、`apps/cli/reference/README.md/.zh.md`、`docs/user/develop/basic/index.md/.zh.md`、`docs/user/develop/basic/tool.md/.zh.md`，各自的 `.i18n.yaml` |
 
-> **e2e 那两个文件是这次合并才补进清单的。** 之前的清单只覆盖单测，导致 `apps/web/tests/smoke-real.e2e.ts` 长期是错的却没人发现 —— 因为它不在 `pnpm run test` 范围内。这是「定制加入时不登记，之后就再没有自然时机补上」的典型。
+> **e2e 是最容易漏的一类。** 它们不在 `pnpm run test` 范围内，所以错了不会有任何本机信号。`built-bin.e2e.ts` 与 `smoke-real.e2e.ts` 是 dsh-v0.1.6-alpha.1 才补进清单的；`web-auth.e2e.ts` 是上游在 dsh-v0.1.6-alpha.2 新增的文件，它解析打印出来的就绪行、然后断言 `firstUrl.origin` 等于 `http://127.0.0.1:<port>`，合并时改成了 `localhost`。
+>
+> **区分两种 e2e 写法**：多数 e2e 用 `/dsh web: (http:\/\/[^\s]+)/` 泛匹配 URL，H1 对它们透明，不用改；只有断言字面 host 的才要改。核对方式是搜 `dsh web: ` 的全部命中，逐个看它是泛匹配还是字面断言。
 
 **批量替换的边界**：纯断言与文档类文件（`web-app.spec.ts`、`web-browser-open.expected.e2e.ts`、各 README 与 docs）可以直接全局替换 `http://127.0.0.1` → `http://localhost`；**源码与配置文件不行**，它们同时含绑定地址，必须逐处判断，见下表。
 
@@ -188,7 +195,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **判断标准**：传给 `--host` 或用于服务器绑定的 → 不改；显示给用户看的 URL（终端、浏览器、system prompt、文档）→ 改。
 
-**冲突高发点**：上游新增测试用例时会带回 `127.0.0.1` 断言。dsh-v0.1.6-alpha.1 就有两处（`web-app.spec.ts` 的 `optional-tool sibling fails` 用例、`built-bin.e2e.ts` 的就绪断言）。
+**冲突高发点**：上游新增测试用例时会带回 `127.0.0.1` 断言。dsh-v0.1.6-alpha.1 有两处（`web-app.spec.ts` 的 `optional-tool sibling fails` 用例、`built-bin.e2e.ts` 的就绪断言）；dsh-v0.1.6-alpha.2 有一处（新文件 `apps/cli/tests/web-auth.e2e.ts`）。**这类改动 git 不会报冲突** —— 上游是新增文件或新增用例，自动合并干净通过。
 
 **验证**
 
@@ -228,7 +235,8 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 | 命令 | 预期证据 | 平台限制 |
 |---|---|---|
-| `pnpm run test packages/client/connection packages/bundle/web-app` | 全绿 | 无 |
+| `pnpm run test packages/client/connection packages/bundle/web-app` | 全绿。`connection/tests/node-half.host.spec.ts` 与 `browser-auth.host.spec.ts` 覆盖 `NO_AUTH_BROWSER_AUTH`；`web-app/tests/startup.spec.ts` 覆盖 flag 到配置的那一段 | 无 |
+| `pnpm run gen-config-catalog` 后看 `docs/config-catalog.md` | `ConnectionConfig` 里有 `noAuth?: boolean`；中文侧同一位置也要有（见流程节的生成物警告） | 无 |
 | `pnpm run doc-sync` | `Cordis config` 检查通过（校验 `cordis.patch.yml` 组合合法） | 无 |
 | 实跑 `pnpm dsh web --no-auth` | 终端出现 `⚠ --no-auth: browser token authentication is disabled`；打印的 URL **不带** `?token=`；直接访问不跳登录 | 需要 key |
 | 实跑不带 `--no-auth` | URL **带** `?token=`（确认默认行为没被改坏） | 需要 key |
@@ -253,69 +261,26 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **关键语义**（容易在合并时被简化掉）：体积上限**会让步**，URL 上限不会。单个超过 1 MiB 的 bundle 仍然可寻址、可服务，所以它**自成一批**，而不是让组合失败 —— 判断条件里的 `current.length === 0 ||` 就是这个让步，删掉它会让大插件直接无法加载。
 
-**冲突高发点**：`client/modules/src/index.ts` 上游改动频繁，且 H4 的定制也在同一个文件里。
+**冲突高发点**：`client/modules/src/index.ts` 上游改动极频繁，而这三个名字都在这一个文件里。**dsh-v0.1.6-alpha.2 的处理方式值得照抄**：这个文件上游重写幅度太大（+355 行改动，新增按需 chunk 路由），逐块合并只会把两边都弄坏 —— 直接 `git checkout <tag> -- <file>` 取上游，再把这三个名字重新贴回去，比解冲突快且不会漏。
+
+**需要跟着改的文档**（改了常量就要改这四处，`doc-sync` 不会替你发现语义漂移）
+
+| 文件 | 位置 |
+|---|---|
+| `packages/client/modules/README.{md,zh.md}` | combo 分区那一段 |
+| `docs/subsystems/client-modules.{md,zh.md}` | 「The bundle route and index injection」一节 |
+| `.agents/notes/implemented/architecture/2026-07-23-client-plugin-loading-model.{md,zh.md}` | 「Combo external-script arrival」一段 |
+| `.agents/notes/implemented/architecture/2026-09-18-combo-body-size-limit.{md,zh.md}` | 本定制的 Agent Note，**决策本身就在这里** |
 
 **验证**
 
 | 命令 | 预期证据 | 平台限制 |
 |---|---|---|
-| `pnpm run test packages/client/modules` | 全绿。`tests/node-half.client.spec.ts` 覆盖分批边界 | 无 |
-| 检查 `docs/subsystems/client-modules.md` | 「Incremental composition」一节保留 1 MiB 与「体积上限会让步」的描述 | 无 |
+| `pnpm run test packages/client/modules -t "1 MiB"` 与 `-t "own batch"` | 两个用例分别通过：`splits startup combos before the served body exceeds 1 MiB`、`gives a single oversized bundle its own batch instead of failing composition` | 无 |
+| 检查 `docs/subsystems/client-modules.md` | 「体积上限会让步」的描述在位，且链接指向 `2026-09-18-combo-body-size-limit.md` | 无 |
 | 远程访问实测：装若干大插件后经隧道打开 Web UI | 页面正常渲染，不出现「Failed to load plugins」 | 需要真实远程环境 |
 
----
-
-#### H4 registerAssets 包资产路由 + PDF.js 资源移出 bundle
-
-**定制内容**：两部分。① 给 `client/modules` 加通用能力 `registerAssets()`，让插件包把二进制资源放在 JS bundle 之外、经共享 `/plugins` 路由提供。② 用它把 PDF.js 的 cMaps、标准字体、wasm 解码器移出客户端 bundle，改为按需从 `/plugins/<id>/assets/<path>` 取。
-
-**为什么**：PDF.js 的这批资源体积很大，塞进 combo bundle 会直接触发 H3 描述的截断风险（这也是 H3 与 H4 同期出现的原因），而它们只在真正打开 PDF 时才需要。
-
-**代码关键名字 —— 通用能力侧**
-
-| 关键名字 | 当前路径 | 说明 |
-|---|---|---|
-| `ClientAssetResponse` | `packages/client/modules/src/index.ts` | 资产响应类型（`body` + `contentType`） |
-| `ClientModuleRegistry.assets` | 同上 | 私有 Map，**与 `batchResponses` 分开持有**：后者每次重组被整表替换，资产生命周期属于登记方的 effect |
-| `registerAssets(id, assets)` | 同上 | 返回 disposer；路径重复时抛错并回滚本次已生效部分 |
-| 请求解析里的 `?? this.assets.get(requestUrl.pathname)` | 同上 | **按 pathname 匹配、忽略 query** |
-
-**关键语义**：资产按 **pathname 匹配**，query 串不参与。资产由所属依赖定版、不是内容 revision 定版，所以过期的缓存键**不能变成 404**。合并时若有人「顺手统一」成和 bundle 一样的全 URL 匹配，缓存分离就会退化成 404。
-
-**代码关键名字 —— PDF.js 侧**
-
-| 关键名字 | 当前路径 | 说明 |
-|---|---|---|
-| `PDF_ASSET_PACKAGE`、`PDF_ASSET_OUTPUT_DIR`（`'lib/pdfjs-assets'`）、`PDF_ASSET_DIRECTORIES`、`PDF_ASSET_KINDS`、`pdfAssetPath()`、`pdfAssetUrl()` | `packages/client/ui-sidebar-documentpreview/src/pdf-asset-route.ts` | **本分支新增文件**，两侧共享的路径约定 |
-| `ASSET_ROOT`、`ASSET_CONTENT_TYPES` + 读目录注册 | `packages/client/ui-sidebar-documentpreview/src/index.ts` | Host 半侧：目录列表即白名单 |
-| `dsh-pdf-asset-copy` 插件、`pdfAssetManifest()`、`pdfLicenseBanner()`、`__DSH_PDFJS_ASSETS__` | `packages/client/ui-sidebar-documentpreview/tsdown.config.ts` | 构建期复制资源 + 注入清单 + 许可证 banner |
-| 浏览器半侧取 URL 逻辑 | `packages/client/ui-sidebar-documentpreview/src/client/pdf/assets.ts` | |
-
-**还要一起改的三个名单文件**（漏一个就会有检查失败，而且报错信息看不出跟这项改动有关）
-
-| 文件 | 加了什么 |
-|---|---|
-| `scripts/check-workspace-constraints.ts` | `packageFileExtras` 里 `'@deepseek-ai/dsh-client-ui-sidebar-documentpreview': ['lib/pdfjs-assets/**']` |
-| `scripts/type-equiv.manifest.json` | `ClientAssetResponse` 条目 |
-| `scripts/gen-cordis-catalog.ts` | `LINK_MAP` 里 `ClientAssetResponse: 'client-modules.md'` |
-
-另外 `packages/client/ui-sidebar-documentpreview/package.json`（`pdfjs-dist` 依赖 + `files` 含 `lib/pdfjs-assets`）、`tsconfig.json`（引用 client-modules）、`pnpm-lock.yaml` 都是连带改动。
-
-**许可证约束**：PDF.js 的许可证不作为资产提供，而是打进 bundle banner（`pdfLicenseBanner()`）。`tests/pdf-license-bundle.client.spec.ts` 会验证打包产物里每份许可证都在。**这个测试必须用 `pnpm run test` 启动**，否则假失败。
-
-**冲突高发点**：`client/modules/src/index.ts`（与 H3 同文件）；三处 scripts 清单在上游改动频繁（`type-equiv.manifest.json` 期间改了 22 次、`gen-cordis-catalog.ts` 改了 34 次）。
-
-**验证**
-
-| 命令 | 预期证据 | 平台限制 |
-|---|---|---|
-| `pnpm run test packages/client/ui-sidebar-documentpreview packages/client/modules` | 全绿 | 无 |
-| `pnpm run hygiene` | `constraints` 通过（证明 `lib/pdfjs-assets/**` 清单条目在位） | publint 全局失败是本机问题，见流程节 |
-| `pnpm run doc-sync` | 通过（证明 `type-equiv` 与 `LINK_MAP` 条目在位） | 无 |
-| 构建后检查 | `packages/client/ui-sidebar-documentpreview/lib/pdfjs-assets/` 下有 cmaps / standard_fonts / wasm 三类文件 | 需先 `pnpm run build` |
-| Web UI 实测：打开一个 PDF | 正常渲染；Network 面板可见 `/plugins/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/assets/...` 请求返回 200 | 需要 key |
-
-**Agent Note**：[`2026-09-12-pdfjs-assets-out-of-bundle.zh.md`](.agents/notes/implemented/architecture/2026-09-12-pdfjs-assets-out-of-bundle.zh.md)（note 若已归档，以本清单为准）
+**Agent Note**：[`2026-09-18-combo-body-size-limit.zh.md`](.agents/notes/implemented/architecture/2026-09-18-combo-body-size-limit.zh.md)
 
 ---
 
@@ -399,15 +364,44 @@ pnpm dsh plugin --help       # 应含 --profile
 
 ### 已被上游吸收
 
-*（当前为空。）*
-
 将来若某项定制被官方实现，把它从上面挪到这里并注明吸收的版本 —— 记下来是为了**下次不再白费力气去保护它**。
+
+#### H4 registerAssets 包资产路由 + PDF.js 资源移出 bundle（dsh-v0.1.6-alpha.2 起不再维护）
+
+**原定制**：① 给 `client/modules` 加 `registerAssets()`，让插件包把二进制资源放在 JS bundle 之外、经共享 `/plugins/<id>/assets/<path>` 路由提供；② 用它把 PDF.js 的 cMaps、标准字体、wasm 解码器移出客户端 bundle，按需取。
+
+**为什么不再维护**：上游在 dsh-v0.1.6-alpha.2 用另一条路解决了同一个问题 —— 新增「包内按需 chunk」机制（`require.async("./client.<name>.js")` + Host 侧 `chunkResponse()`），把 PDF 整块挪进独立的 `client.pdf.js`，二进制数据以 base64 内联在那个 chunk 里。原动机（一次截断毁掉整页）因此消失：实测构建后 `client.js` 只有 0.15 MiB，PDF 全部 6.78 MiB 在按需 chunk 里，根本不进启动批次，截断只影响 PDF 预览。
+
+**代价**（这条要留着，将来若真被 4.4 MiB→6.78 MiB 卡住，回头看这里）：首次打开 PDF 要下 6.78 MiB（immutable 缓存，只下一次），且哪怕只需要一个 cmap 也得全下。按需取单文件的能力没了。
+
+**当时怎么退的**：`ui-sidebar-documentpreview` 整包取上游（上游这一版重写了 74 个文件），删掉本分支新增的 `src/pdf-asset-route.ts`；`client/modules` 侧删掉 `registerAssets()`、`ClientAssetResponse`、`assets` 表与两个相关测试；三处名单文件（`check-workspace-constraints.ts` 的 `lib/pdfjs-assets/**`、`type-equiv.manifest.json`、`gen-cordis-catalog.ts` 的 `LINK_MAP`）全部取上游。H3 与它同期出现但**独立成立**，已保留。
+
+**Agent Note**：原 note 已归档为 [`archived/architecture/2026-09-12-pdfjs-assets-out-of-bundle.md`](.agents/notes/archived/architecture/2026-09-12-pdfjs-assets-out-of-bundle.md)（归档件冻结，只作历史快照，不是当前依据）。存活的那一半决策移到了 [`2026-09-18-combo-body-size-limit.zh.md`](.agents/notes/implemented/architecture/2026-09-18-combo-body-size-limit.zh.md)。
 
 > 一个已澄清的误解：git 历史里标题为「修复 127.0.0.1 访问时特权 API 全部 403」的那个提交看起来像一项独立定制，其实它就是 [H1](#h1-localhost-显示-url) 的第一次实施，改的 17 个文件全在 H1 清单内。而 `loopback-hostname.ts`、`api-request-trust.ts` 是**上游自带**的，本分支没碰过。
 
 ---
 
 ## 三、合并历史
+
+### dsh-v0.1.6-alpha.2（2026-09-18）
+
+上游 887 个提交 vs 本分支 15 个提交，merge-base 为 `dsh-v0.1.6-alpha.1`。**这次的主事件不是解冲突，是退掉一项定制**：H4 被上游用另一套机制覆盖，经用户拍板放弃（决策与代价记在[已被上游吸收](#h4-registerassets-包资产路由--pdfjs-资源移出-bundledsh-v016-alpha2-起不再维护)）。
+
+**冲突 22 个文件**，分四类：生成物 1（`tool-cordis/src/api-catalog.ts`）、`ui-sidebar-documentpreview` 8（整包取上游）、`client/modules` 4、文档与 note 9（`config-catalog`、`subsystems/client-modules`、`client-plugin-loading-model` 三组翻译对）。
+
+**踩到的坑，按教训价值排序：**
+
+1. **上游可能用别的路解决同一个问题，这比冲突难处理得多。** git 只说「有冲突」，不会说「上游已经不需要你这项定制了」。判据是看上游**为什么**改动那片代码：这次上游新增了按需 chunk 机制，H4 的动机随之消失。发现这种情况要停下来问用户，不要自作主张移植或放弃 —— 两边都是方案级决定。
+2. **上游重写幅度过大的文件不要逐块解冲突。** `client/modules/src/index.ts` 上游改了 355 行、响应表从 `{ body: Buffer }` 换成惰性 `LazyResponse`。正确做法是 `git checkout <tag> -- <file>` 取上游，再把定制的几个关键名字重新贴回去。逐块合并的结果是既保不住定制、又破坏上游新逻辑。
+3. **退定制要连它的 Agent Note 一起处理。** 决策被推翻不能改原 note（`implemented/` 的规矩是「事实可就地订正，决策不可回溯改写」），要新建一个 note 记录新决策、把旧 note 整套归档（加 `Archived:` 行、`verify-archived-agent-notes --write` 重录封印，归档件的 `.i18n.yaml` 哈希得手工 `git hash-object` 算 —— `verify-translation-pairing` 不收归档路径）。
+4. **`hygiene` 的两项要先 build。** `publint` 与 `built package invariants` 消费 `lib/`，而 `pnpm run clean` 刚删了它们。第一轮据此误判「publint 是 Windows 老问题」，build 之后 16 项全过 —— 旧清单那条记录是错的，已订正。
+5. **生成物的中文侧不是生成的。** `gen-config-catalog` 只写 `docs/config-catalog.md`，H2 的 `noAuth` 条目在 `.zh.md` 里得手工补。`doc-sync` 的 `config catalog` 关卡会抓到，但报错信息看不出跟 H2 有关。
+6. **翻译对里跨语言链接必须两侧同一个目标。** 中文 note 链到归档件时也要写 `.md`，写 `.zh.md` 会被 `verify-translation-pairing` 判为「link target diverges between the pair」—— 归档件不在翻译对语料内，检查器没法做语言映射。
+7. **上游新增的 e2e 会带回 `127.0.0.1` 字面断言。** `apps/cli/tests/web-auth.e2e.ts` 是新文件，自动合并干净通过，但它断言就绪 URL 的 origin 是 IP 字面量。这类问题**本机没有任何信号** —— e2e 不在 `pnpm run test` 范围。
+8. **上游新依赖可能下载超时。** `@deepseek-ai/libreoffice-kit-win32-x64`（新的 Office 预览）体积大，默认超时下载失败；`pnpm install --fetch-timeout 600000` 解决。
+
+**最终验证状态**：typecheck / lint / doc-sync(41) / duplication(0 clones) / hygiene(16，build 后) / build 全过。全量单测 24501 项通过；两轮全量各报 28 / 33 个失败，串行复核后全部归入流程节的本机环境表，无回归。`test:snapshot` 与 `test:e2e` **未能验证**（Windows 平台限制 + 无 key），其中 `web-auth.e2e.ts` 那处改动只做了静态核对，没有实跑证据。
 
 ### dsh-v0.1.6-alpha.1（2026-09-15）
 
@@ -442,7 +436,9 @@ pnpm dsh plugin --help       # 应含 --profile
 
 **怎么分类**：改了官方文件 → 归到高风险，写全套（为什么 / 关键名字 / 合并时最容易出错的地方 / 验证）；只新增文件 → 归到低风险，表格里一行就够。依据是**合并时出错的风险**，不是工作量。
 
-**关键名字优先于路径**：符号名比文件路径稳定得多。0.1.6-alpha.1 这一次，`LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`registerAssets`、`NO_AUTH_BROWSER_AUTH`、`OutputCollector` 跨 800 个上游提交全部存活，而文件路径已经变了一个。
+**关键名字优先于路径**：符号名比文件路径稳定得多。0.1.6-alpha.1 那次，`LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`registerAssets`、`NO_AUTH_BROWSER_AUTH`、`OutputCollector` 跨 800 个上游提交全部存活，而文件路径变了一个；0.1.6-alpha.2 又跨 887 个提交全部存活（`registerAssets` 例外，是我们主动退掉的）。
+
+**退定制时写进「已被上游吸收」，不要删。** 删掉等于把「为什么放弃」和「代价是什么」一起删掉，下次遇到同一个痛点会从零开始重新论证一遍。编号也不重排。
 
 **不贴大段 diff**：代码片段会过期，而且看起来很权威，比没有更危险。例外是「定制本身就是那一小段文本」的情况，比如 H1 的注释护栏。
 
