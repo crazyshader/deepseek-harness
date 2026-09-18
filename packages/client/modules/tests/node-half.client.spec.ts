@@ -736,10 +736,12 @@ describe('client bundle activation', () => {
       ['@fixture/body-first', '@fixture/body-second'],
       ['@fixture/body-third'],
     ])
+    // The limit measures artifact bytes, so a served body is those bytes plus
+    // combo framing; both batches stay under the limit even counting the framing.
     for (const batch of batches) {
       const response = await routeRequest(route, batch.url)
       expect(response.status).toBe(200)
-      expect(response.body.byteLength).toBeLessThanOrEqual(1024 * 1024 + filler.length)
+      expect(response.body.byteLength).toBeLessThan(1024 * 1024)
     }
   })
 

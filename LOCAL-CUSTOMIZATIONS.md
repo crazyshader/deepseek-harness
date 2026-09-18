@@ -251,6 +251,8 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 **为什么**：远程访问（网络较差或经隧道）时，单个 combo 响应体过大会被截断。而 combo 脚本是**全有或全无**的 —— 一个批次就是一个 `<script>`，其中第一处不完整的语句会让同一文件里后续所有插件注册都不执行，整个页面白屏。加了体积上限后，一次截断最多损失一批。
 
+**H4 退役后它还有用吗？有，而且是批次体积的唯一实际约束。** dsh-v0.1.6-alpha.2 实测：本仓库构建出 63 个 client 入口，合计 5.12 MiB，最大的单个入口 639 KiB（都够不到 1 MiB）；把 63 个名字全列出来的 map 形式 combo URL 是 3359 字节，刚过 3 KiB。所以**只靠 URL 上限只会切成两批，第一批扛着那 5.12 MiB 的绝大部分**；加上体积上限后至少六批、每批不超过 1 MiB。下次怀疑这项定制是否还必要时，重跑这两个测量即可，别靠印象判断。
+
 **代码关键名字**
 
 | 关键名字 | 当前路径 | 说明 |
@@ -372,7 +374,7 @@ pnpm dsh plugin --help       # 应含 --profile
 
 **为什么不再维护**：上游在 dsh-v0.1.6-alpha.2 用另一条路解决了同一个问题 —— 新增「包内按需 chunk」机制（`require.async("./client.<name>.js")` + Host 侧 `chunkResponse()`），把 PDF 整块挪进独立的 `client.pdf.js`，二进制数据以 base64 内联在那个 chunk 里。原动机（一次截断毁掉整页）因此消失：实测构建后 `client.js` 只有 0.15 MiB，PDF 全部 6.78 MiB 在按需 chunk 里，根本不进启动批次，截断只影响 PDF 预览。
 
-**代价**（这条要留着，将来若真被 4.4 MiB→6.78 MiB 卡住，回头看这里）：首次打开 PDF 要下 6.78 MiB（immutable 缓存，只下一次），且哪怕只需要一个 cmap 也得全下。按需取单文件的能力没了。
+**代价**（留着这条，将来真被 PDF 首开耗时卡住时回头看）：首次打开 PDF 要下 `client.pdf.js` 整块 **6.78 MiB**（构建后实测；immutable 缓存，只下一次），哪怕只需要一个 cmap 也得全下 —— 原定制是按需取单个文件、总量 3.31 MiB 且不 base64 膨胀。要恢复的话，移植目标已经变了：上游的资源是 base64 内联在 pdf chunk 里，不是独立文件。
 
 **当时怎么退的**：`ui-sidebar-documentpreview` 整包取上游（上游这一版重写了 74 个文件），删掉本分支新增的 `src/pdf-asset-route.ts`；`client/modules` 侧删掉 `registerAssets()`、`ClientAssetResponse`、`assets` 表与两个相关测试；三处名单文件（`check-workspace-constraints.ts` 的 `lib/pdfjs-assets/**`、`type-equiv.manifest.json`、`gen-cordis-catalog.ts` 的 `LINK_MAP`）全部取上游。H3 与它同期出现但**独立成立**，已保留。
 
@@ -441,5 +443,11 @@ pnpm dsh plugin --help       # 应含 --profile
 **退定制时写进「已被上游吸收」，不要删。** 删掉等于把「为什么放弃」和「代价是什么」一起删掉，下次遇到同一个痛点会从零开始重新论证一遍。编号也不重排。
 
 **不贴大段 diff**：代码片段会过期，而且看起来很权威，比没有更危险。例外是「定制本身就是那一小段文本」的情况，比如 H1 的注释护栏。
+
+**本文件不在任何检查关卡内。** 它是 fork 私有文件，`verify-md-links` 的语料不含它（实测 2009 个受检文件里没有它），所以内部锚点链接失效不会有人报错。改完自查一次：
+
+```powershell
+npx tsx -e "import { findViolations, anchorCache } from './scripts/verify-md-links.ts'; import { resolve } from 'node:path'; const v = findViolations(resolve('LOCAL-CUSTOMIZATIONS.md'), anchorCache()); console.log(v.length === 0 ? 'all links OK' : JSON.stringify(v, null, 1))"
+```
 
 **与 Agent Note 的分工**：note 记「为什么这么设计、考虑过哪些替代方案」，本清单记「是什么、在哪、怎么验」。note 可能被归档冻结，**冲突时以本清单为准**。

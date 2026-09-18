@@ -28,6 +28,8 @@ Status: implemented
 
 启动发出的请求比合成一个脚本时更多。它们会并行预加载、每个都小得多，因此单次失败的代价是一个批次，而不是整个页面。
 
+这条上限是批次体积的实际约束，不是形式条款。对本仓库构建出的 63 个 client 入口实测（近似于实际发布的 Web 名册）：总计 5.12 MiB，最大的单个入口 639 KiB，所以没有任何入口单独触到上限；而把它们全部列出的 map 形式 combo URL 是 3,359 字节。也就是说单靠 URL 上限只会把 application 阶段切成两批，第一批承载那 5.12 MiB 的绝大部分；加上体积上限后至少切成六批，没有一批超过 1 MiB。
+
 本 note 取代了 [PDF.js 资源决策](../../archived/architecture/2026-09-12-pdfjs-assets-out-of-bundle.md) 中的资产路由那一半，该 note 已归档。`clientModules.registerAssets()` 与 `/plugins/<id>/assets/<path>` 路由都已移除：`ui-sidebar-documentpreview` 现在把 PDF.js 放在按需加载的包内 chunk 里、由该 chunk 自带二进制数据，因此这些资源根本不进入启动批次，也不再需要单独的承载路由。体积上限本身独立成立，不依赖任何单个包的体积。
 
 ## 验证

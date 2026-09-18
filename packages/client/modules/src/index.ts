@@ -248,14 +248,18 @@ function comboBodyBytes(records: readonly WebPluginRecord[]): number {
   return total
 }
 
-/** Partition one phase in graph order without allowing a generated URL above the protocol limit. */
+/**
+ * Partition one phase in graph order under both batch limits: a generated URL
+ * above {@link MAX_COMBO_URL_BYTES} is unaddressable and throws, while a served
+ * body above {@link MAX_COMBO_BODY_BYTES} only ends the current batch.
+ */
 function partitionComboRecords(records: readonly WebPluginRecord[]): WebPluginRecord[][] {
   const chunks: WebPluginRecord[][] = []
   let current: WebPluginRecord[] = []
   for (const record of records) {
     const candidate = [...current, record]
     // An oversized single bundle cannot be split, so the body limit constrains
-    // only a batch that already carries a record; the URL limit below stays hard.
+    // only a batch that already carries a record.
     const withinBody = current.length === 0 || comboBodyBytes(candidate) <= MAX_COMBO_BODY_BYTES
     if (withinBody && projectedComboUrlBytes(candidate) <= MAX_COMBO_URL_BYTES) {
       current = candidate

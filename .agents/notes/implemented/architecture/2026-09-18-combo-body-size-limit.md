@@ -28,6 +28,8 @@ The limit measures the artifact bytes a batch would serve, before combo framing 
 
 Startup makes more requests than one combined script would. They are preloaded in parallel and each is far smaller, so a single failure costs one batch rather than the page.
 
+The limit is the binding constraint on batch size, not a formality. Measured over the 63 built client entries in this tree (an approximation of the shipped Web roster): they total 5.12 MiB and the largest single entry is 639 KiB, so no entry reaches the limit on its own, while the map-form combo URL naming all of them is 3,359 bytes. The URL limit alone would therefore split the application phase into two batches, the first carrying most of those 5.12 MiB; the body limit splits it into at least six, none above 1 MiB.
+
 This note supersedes the asset-route half of [the PDF.js asset decision](../../archived/architecture/2026-09-12-pdfjs-assets-out-of-bundle.md), which is archived. `clientModules.registerAssets()` and the `/plugins/<id>/assets/<path>` route are gone: `ui-sidebar-documentpreview` now loads PDF.js in an on-demand package-local chunk that carries its own binary data, so those resources never enter a startup batch and no longer need a separate carrier. The body limit stands on its own, independent of any single package's size.
 
 ## Verification
