@@ -164,7 +164,15 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 这段注释在 dsh-v0.1.6-alpha.1 合并中**被上游注释覆盖过一次**（常量值保住了、注释丢了）。没有工具会报这种丢失：编译器不报、测试不红、lint 不管。
 
-**需要跟着改的文件**（19 个内容文件 + 4 个 `.i18n.yaml` 配对）
+**需要跟着改的文件**（20 个内容文件 + 4 个 `.i18n.yaml` 配对）
+
+> 这个数字手工维护过两次都错了。别信它，用命令数：
+>
+> ```powershell
+> git diff <tag> HEAD --name-only -- README.* apps/cli/reference apps/cli/tests apps/web/tests docs/user/develop/basic packages/bundle/web-app/src/index.ts packages/bundle/web-app/tests scripts/publish-npm-baseline.ts scripts/fixtures/translation-prompt scripts/snapshots/translation-prompt-v4
+> ```
+>
+> 结果里 `packages/bundle/web-app/tests/startup.spec.ts` 属于 H2，不算 H1。
 
 | 类别 | 文件 |
 |---|---|
@@ -172,7 +180,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | 单测（2） | `packages/bundle/web-app/tests/web-app.spec.ts`（约 17 处）、`tests/browser-open.spec.ts` |
 | 就绪检测（2） | `apps/cli/tests/lazy-search-startup.compat.spec.ts`（2 处正则）、`scripts/publish-npm-baseline.ts`（Python 探针字节串） |
 | **e2e（3）** | `apps/cli/tests/built-bin.e2e.ts`、`apps/web/tests/smoke-real.e2e.ts`、`apps/cli/tests/web-auth.e2e.ts` |
-| 快照（3） | `apps/cli/tests/web-browser-open.expected.e2e.ts`、`scripts/snapshots/translation-prompt-v4/request-response.expected.json`、`scripts/fixtures/translation-prompt/examples/product.{md,zh.md}` |
+| 快照（4） | `apps/cli/tests/web-browser-open.expected.e2e.ts`、`scripts/snapshots/translation-prompt-v4/request-response.expected.json`、`scripts/fixtures/translation-prompt/examples/product.md`、`…/product.zh.md` |
 | 文档（8+4） | `README.md/.zh.md`、`apps/cli/reference/README.md/.zh.md`、`docs/user/develop/basic/index.md/.zh.md`、`docs/user/develop/basic/tool.md/.zh.md`，各自的 `.i18n.yaml` |
 
 > **e2e 是最容易漏的一类。** 它们不在 `pnpm run test` 范围内，所以错了不会有任何本机信号。`built-bin.e2e.ts` 与 `smoke-real.e2e.ts` 是 dsh-v0.1.6-alpha.1 才补进清单的；`web-auth.e2e.ts` 是上游在 dsh-v0.1.6-alpha.2 新增的文件，它解析打印出来的就绪行、然后断言 `firstUrl.origin` 等于 `http://127.0.0.1:<port>`，合并时改成了 `localhost`。
@@ -191,6 +199,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `apps/cli/tests/built-bin.e2e.ts` 里 `--host 0.0.0.0` 相关断言 | 绑定建议（**注意**：同文件的就绪行断言要改） |
 | `packages/host/webserver/src/index.ts` 的 `z.const('127.0.0.1')` | 绑定 schema |
 | `packages/client/connection/src/loopback-hostname.ts` | **上游自带**，已同时接受两种写法，无需改 |
+| `apps/desktop-host/src/index.ts` 的 `authenticatedUrl('http://127.0.0.1:<port>')` | **最像 H1 但绝对不能改的一处。**dsh-v0.1.6-alpha.2 新增的 Electron 宿主包，它算出的是渲染进程用的 `streamBaseUrl`。Electron 里页面来自 `dsh-app://app`，`apps/desktop/src/main.ts` 会把出站请求的 `Origin` 改写成 `target.origin`（同文件搜 `sec-fetch-site`），也就是说它自己保证了 Origin 与 base URL 一致 —— Chrome 剥端口那个前提根本不成立。改成 `localhost` 只会让两边不一致 |
 | `llm-*` / `mcp-*` / `subagent-*` / `system-prompt` / `ui-chat` 测试里的 `127.0.0.1` | 无关的 mock 服务器地址 |
 
 **判断标准**：传给 `--host` 或用于服务器绑定的 → 不改；显示给用户看的 URL（终端、浏览器、system prompt、文档）→ 改。
@@ -204,7 +213,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `pnpm run test packages/bundle/web-app` | 全绿。这是唯一能抓到显示 URL 回归的单测 | 无 |
 | 全局搜 `dsh web: http://127\.0\.0\.1` 与 `http://127\.0\.0\.1:3080` | 除本文件和上表「不要改」的位置外无命中 | 用 ripgrep，**不要**用 PowerShell 递归搜索（会撞 pnpm 符号链接循环并超时） |
 | 实跑 `pnpm dsh web --port 3080` | 终端出现 `dsh web: http://localhost:3080/?token=...`；浏览器打开后 DevTools Console 无 403 | 需要 API key |
-| `pnpm run test:e2e`（含上表 e2e 两项） | 就绪断言匹配 `localhost` | 需要 key；**不在 `pnpm run test` 范围** |
+| `pnpm run test:e2e`（含上表 e2e 三项） | 就绪断言匹配 `localhost` | 需要 key；**不在 `pnpm run test` 范围** |
+
+> **`test:snapshot` 跑不了，不影响 H1 —— 这条已核实，不用再担心。** 录制的会话快照里没有任何一处固定了 dsh web 的 URL：`snapshots/web/**/system-prompt.expected.md` 把它归一化成 `{{webUrl}}` 占位符，而 `snapshots/` 里出现的 `http://127.0.0.1:43118` 全是 web-search 的 mock provider 端点，与显示 URL 无关。所以 Windows 上跑不了快照回放这件事，掩盖不了 H1 的回归；H1 唯一没有本机信号的缺口是上面那三个 e2e。
 
 ---
 
@@ -213,6 +224,10 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 **定制内容**：新增 `--no-auth` 启动开关，跳过浏览器 token / cookie 交换，供可信本地环境使用。Host/Origin 信任围栏**不受影响**。
 
 **为什么**：本地或内网可信环境下（例如经 Tailscale 访问），每次启动都要带 token 的 URL 很不方便。注意这个开关**只关掉 token 交换**，不是关掉全部访问控制 —— 信任围栏和「拒绝 `--host 0.0.0.0`」都还在。
+
+> **残余风险，用之前要清楚。** 开了 `--no-auth` 之后，唯一还在拦人的就是「绑定在回环地址」加「Host/Origin 信任围栏」。谁能把请求送到这个回环端口、且 Host 头在围栏白名单里，就直接拿到完整的 RPC 权限 —— 而 dsh 的 RPC 能执行命令、读写文件。所以：本机独占用没问题；一旦叠加端口转发（Tailscale、`ssh -R`、反向代理）再配 `--trusted-host`，等于把无认证的代码执行入口暴露给能到达那条隧道的任何人。默认不开这个开关，就是因为这个。
+>
+> 结构上这条链是完整的：`HostConnectionService` 的 `browserAuth` 字段类型是接口 `BrowserAuthenticator`，所以上游任何时候给 `BrowserAuth` 加方法并在服务里调用，`NO_AUTH_BROWSER_AUTH` 少实现就会编译不过 —— 认证面不会被悄悄绕过。核实过全仓库只有 `rpc-host.ts` 消费 `browserAuth`。
 
 **代码关键名字**
 
@@ -224,7 +239,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `ConnectionConfig.noAuth` + `Config` 的 `noAuth: z.boolean().default(false)` | `packages/client/connection/src/index.ts` | 配置项 |
 | `apply()` 里 `config?.noAuth === true ? NO_AUTH_BROWSER_AUTH : await BrowserAuth.create(...)` | 同上 | 选择点 |
 | `HostConnectionService` 构造参数类型 `BrowserAuthenticator` | `packages/client/connection/src/rpc-host.ts` | 从具体类放宽为接口 |
-| `--no-auth` flag + `noAuth: !options.auth` + 启动警告 | `packages/bundle/web-app/src/startup.ts` | CLI 入口 |
+| `--no-auth` flag + `noAuth: !options.auth` + 启动警告 | `packages/bundle/web-app/src/startup.ts` | CLI 入口。警告走 `console.log`（stdout），跟就绪行同一条流；现有的就绪行解析都用正则匹配，多一行不影响，但若将来给 stdout 做严格逐行解析，记得它在那儿 |
 | `inject: [webRuntime, webStartup]` + `noAuth: !!js ctx.webStartup.noAuth` | `packages/bundle/web-app/cordis.patch.yml` | **组合接线，typecheck 抓不到这里的错误** |
 
 **链路完整性**：`startup.ts`（读 flag）→ `cordis.patch.yml`（传配置）→ `connection/src/index.ts`（选实现）。**三段缺一段就静默失效** —— 中间那段是 YAML，类型检查覆盖不到。
@@ -337,16 +352,18 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 合并后最省事的核对方式：
 
 ```powershell
-pnpm dsh web --help          # 应含 --port / --no-open / --no-auth
+pnpm dsh web --help          # 应含 --host / --port / --no-open / --no-auth / --trusted-host
 pnpm dsh plugin --help       # 应含 --profile
 ```
+
+dsh-v0.1.6-alpha.2 实测：`dsh web --help` 五个 flag 都在（这同时是 H2 的**端到端证据** —— `--no-auth` 确实注册到了真实命令上，不只是源码里有）；`dsh.profile.bundles` 的语义在 `packages/boot/app-boot/src/profile-plugins.ts` 里没变，profile 目录仍是 `$DSH_HOME/profiles/<name>` 加 `cordis.patch.yml`，启动器的插件识别与快照/回滚假设都还成立。
 
 **启动器自己也有两处跟合并有关的行为，都已修好**（原先是两个隐患，2026-09-15 修的）：
 
 | 关键名字 | 位置 | 做什么 |
 |---|---|---|
 | `dist_is_stale()`、`_frontend_commit_time()`、`_FRONTEND_PATHS` | `dsh-launcher/main.py` | 检查前端构建产物是不是比前端代码还旧。旧了就在状态栏显示「已构建（早于当前代码）」并在启动时打一行提醒，**但不拦着不让启动** |
-| `dsh_home()` | `dsh-launcher/plugin_manager.py` | 读 `DSH_HOME` 的规则跟 Node 侧 `resolveDshHome()` 对齐：纯空白当没设置、相对路径转成绝对路径 |
+| `dsh_home()`、`_expand_home_prefix()` | `dsh-launcher/plugin_manager.py` | 读 `DSH_HOME` 的规则跟 Node 侧 `resolveDshHome()` 对齐三条：纯空白当没设置、相对路径转成绝对路径、**只展开开头的 `~` / `~/` / `~\`**。第三条是 dsh-v0.1.6-alpha.2 review 时补的：原先直接用 `Path.expanduser()`，它会把 `~alice/dsh` 展开成 alice 的家目录，而 Node 侧的 `expandHomePath()` 只认那三种形式、把 `~alice/dsh` 当字面相对路径锚到工作目录 —— 两边指向不同位置。对齐后两侧对 `~`、`~/dsh`、`~\dsh`、`~alice/dsh`、`rel/dsh`、`"   "`、`""`、未设置这八种输入逐一实测一致 |
 
 为什么要做这两件事：拉取或合并官方代码后，`dist` 还在但已经是旧的，启动器原先只看文件存不存在，「启动」按钮照样亮，跑起来的是过期前端，界面上完全看不出异常。而 `DSH_HOME` 那条，原先纯空白字符串会被当成有效路径、相对路径不转绝对，导致启动器和 dsh **指向不同的 profile 目录**，插件列表、快照、回滚会静默作用在错误位置。
 
@@ -403,7 +420,16 @@ pnpm dsh plugin --help       # 应含 --profile
 7. **上游新增的 e2e 会带回 `127.0.0.1` 字面断言。** `apps/cli/tests/web-auth.e2e.ts` 是新文件，自动合并干净通过，但它断言就绪 URL 的 origin 是 IP 字面量。这类问题**本机没有任何信号** —— e2e 不在 `pnpm run test` 范围。
 8. **上游新依赖可能下载超时。** `@deepseek-ai/libreoffice-kit-win32-x64`（新的 Office 预览）体积大，默认超时下载失败；`pnpm install --fetch-timeout 600000` 解决。
 
-**最终验证状态**：typecheck / lint / doc-sync(41) / duplication(0 clones) / hygiene(16，build 后) / build 全过。全量单测 24501 项通过；两轮全量各报 28 / 33 个失败，串行复核后全部归入流程节的本机环境表，无回归。`test:snapshot` 与 `test:e2e` **未能验证**（Windows 平台限制 + 无 key），其中 `web-auth.e2e.ts` 那处改动只做了静态核对，没有实跑证据。
+**最终验证状态**：typecheck / lint / doc-sync(41) / duplication(0 clones) / hygiene(16，build 后) / build 全过。全量单测 24501 项通过；两轮全量各报 28 / 33 个失败，串行复核后全部归入流程节的本机环境表，无回归。`test:snapshot` 与 `test:e2e` **未能验证**（Windows 平台限制 + 无 key），其中 `web-auth.e2e.ts` 那处改动只做了静态核对，没有实跑证据。已核实 `test:snapshot` 跑不了不掩盖 H1 缺口（见 H1 验证节）。
+
+**合并后又做了一轮 review，补了这些**（合并本身没错，是清单和边角的问题）：
+
+1. `partitionComboRecords` 的 JSDoc 只写了 URL 上限，加了体积上限后就残了 —— 这类残缺编译器和测试都不报。
+2. H3 那个 1 MiB 测试的容差留了一整个产物（`1 MiB + filler.length`），回归到 1.4 MiB 也照样绿。改成 `toBeLessThan(1024 * 1024)`。
+3. 「全有或全无」这条理由同时躺在常量注释、package README、subsystems 页、Agent Note 四处。README 只留行为，理由归常量注释和 note。
+4. 本清单的 H1 文件数手工维护写错了（19 应为 20，快照那行写 3 实为 4）—— 已换成用命令数。
+5. 启动器 `dsh_home()` 声称与 Node 侧「逐条一致」，实际 `Path.expanduser()` 会展开 `~alice/dsh`，Node 侧不会。已按 Node 规则重写并双侧八例实测。
+6. 补记了三条该记未记的事实：`apps/desktop-host` 那处 IP 字面量为什么不能动、录制快照不固定 dsh web URL、`--no-auth` 的残余风险。
 
 ### dsh-v0.1.6-alpha.1（2026-09-15）
 

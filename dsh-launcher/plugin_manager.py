@@ -37,18 +37,31 @@ def dsh_home() -> Path:
     归一化规则必须与 Node 侧的 resolveDshHome()
     （packages/util/home-paths/src/index.ts）逐条一致，否则启动器与 dsh
     会指向不同的 profile 目录，而且两边都不会报错——插件列表、快照、
-    回滚会静默作用在错误位置。对齐的两条：
+    回滚会静默作用在错误位置。对齐的三条：
 
     1. 空串和纯空白都当作未设置。只判断 `if env` 会把 DSH_HOME="   "
        当成有效路径，dsh 那边却回落到 ~/.dsh。
     2. 结果转成绝对路径。相对路径的 DSH_HOME 在 Node 侧经 resolve()
        锚定到进程工作目录，Python 侧不转则保持相对，两边解释不同。
+    3. 只展开开头的 `~`、`~/`、`~\\`。Node 侧的 expandHomePath() 只认
+       这三种形式，`~alice/dsh` 会被它当作字面相对路径锚到工作目录；
+       Python 的 Path.expanduser() 却会把它展开成 alice 的家目录，于是
+       两边指向不同位置。所以这里不能直接用 expanduser()。
     """
     env = os.environ.get("DSH_HOME")
     # 与 Node 侧一致：用 strip() 判断是否为空，取值仍用未 strip 的原值。
     if env is not None and env.strip():
-        return Path(env).expanduser().resolve()
+        return Path(_expand_home_prefix(env)).resolve()
     return (Path.home() / ".dsh").resolve()
+
+
+def _expand_home_prefix(path: str) -> str:
+    """按 Node 侧 expandHomePath() 的规则展开开头的 `~`，其余原样返回。"""
+    if path == "~":
+        return str(Path.home())
+    if path.startswith(("~/", "~\\")):
+        return str(Path.home() / path[2:])
+    return path
 
 
 def web_profile_dir() -> Path:
