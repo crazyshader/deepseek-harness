@@ -121,7 +121,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 5. 逐项功能验证
 
-按第二节清单里每项的「验证」小节执行。**高风险那 4 项都要验**，低风险的 3 项不用。
+按第二节清单里每项的「验证」小节执行。**高风险那 5 项都要验**，低风险的 3 项不用。
 
 ### 6. 回写本文档
 
@@ -135,7 +135,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 高风险改动
 
-4 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H5 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
+5 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H5/H6 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
 
 ---
 
@@ -328,6 +328,44 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `pnpm run typecheck` | 通过（Windows 上这是唯一能覆盖该文件的本机手段） | 无 |
 
 **Agent Note**：[`2026-09-15-subprocess-spill-fault-degradation.zh.md`](.agents/notes/implemented/bug-fix/2026-09-15-subprocess-spill-fault-degradation.zh.md)（note 若已归档，以本清单为准）
+
+---
+
+#### H6 工具调度器 symbol 用全局注册表
+
+**定制内容**：`TOOL_RUNTIME_SCHEDULER` 由 `Symbol(...)` 改为 `Symbol.for(...)`，键字符串不变。
+
+**为什么**：源码模式启动（`pnpm dsh` = `node --import tsx/esm apps/cli/src/bin.ts`，**图形启动器走的就是这条**）会让 `@deepseek-ai/dsh-tools` 被加载两份 —— tsx 按 `tsconfig.base.json` 的 `paths` 把包名解析到 `src/`，而 cordis Loader 从 profile 目录按 Node `exports` 解析到 `lib/`。`Symbol()` 每次求值产生唯一值，两份各持一个不相等的键，于是 `ctx.tools[TOOL_RUNTIME_SCHEDULER]` 读到 `undefined`，**第一次工具调用就以 `TypeError: Cannot read properties of undefined (reading 'prepare')` 结束整轮**（`code: UNKNOWN`，无 `tool/result` 事件）。`Symbol.for` 走全局注册表按字符串查找，跨模块实例相等。
+
+用构建产物启动（`node apps/cli/lib/bin.js`）只加载一份，本来就不触发；这项定制是为了让源码模式也能用。
+
+**残留事实**：两份模块的 `ToolRuntime` **类**仍不是同一个，`Symbol.for` 不改变这点。核实过全仓没有跨包 `instanceof ToolRuntime`，tools 包也无模块级可变状态，故当前无害 —— 但将来若新增跨包 `instanceof` 或跨包共享的模块级状态，平面混用会再次咬人。
+
+**代码关键名字**
+
+| 关键名字 | 当前路径 | 说明 |
+|---|---|---|
+| `TOOL_RUNTIME_SCHEDULER` | `packages/core/tools/src/index.ts` | 唯一改动点，值为 `Symbol.for('@deepseek-ai/dsh-tools.scheduler')` |
+| 常量上方的 JSDoc 护栏 | 同上 | 说明「为什么不能用 `Symbol()`」，见下方「注释护栏」 |
+
+**注释护栏**：该常量的 JSDoc 必须保留说明双平面加载后果的段落，末句是：
+
+```
+Reverting to `Symbol()` restores that failure and neither the compiler nor
+the test suite rejects it.
+```
+
+这段话是这项定制唯一的护栏。**改回 `Symbol()` 编译器不报、测试不红、lint 不管** —— 全仓没有任何关卡覆盖它，只有真机跑一次工具调用才会暴露。
+
+**冲突高发点**：`packages/core/tools/src/index.ts` 是上游高频改动文件，而本定制只有一行。上游若重写该文件附近，自动合并很可能干净通过却把 `Symbol.for` 换回 `Symbol()`。合并后**必须直接搜 `Symbol.for('@deepseek-ai/dsh-tools.scheduler')` 确认它还在**。
+
+**验证**
+
+| 命令 | 预期证据 | 平台限制 |
+|---|---|---|
+| `pnpm run test packages/core/tools packages/core/agent-loop` | 全绿（实测 36 文件 / 842 通过 / 1 跳过） | 无 |
+| `pnpm run build:lib:host` | 无类型错误（确认 TS 接受 `Symbol.for` 赋给 `unique symbol`） | 无 |
+| 用启动器（或 `pnpm dsh web`）启动后发一条触发工具调用的消息 | 工具正常执行，不出现 `reading 'prepare'` | 需要可用模型 |
 
 ---
 

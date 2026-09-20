@@ -458,9 +458,20 @@ export interface ToolRuntimeScheduler {
 
 /**
  * Scheduler entry point omitted from the generated named service API.
+ *
+ * A global registry key (`Symbol.for`), not a per-evaluation `Symbol()`: the
+ * consumer reading this key off a `ToolRuntime` instance can hold a different
+ * module instance of this package than the one that created that instance. A
+ * source-plane launch resolves this package through tsconfig `paths` to `src`
+ * while the Loader resolves a profile dependency through package `exports` to
+ * `lib`, and each evaluation of a unique `Symbol()` yields an unequal key, so
+ * `ctx.tools[TOOL_RUNTIME_SCHEDULER]` reads `undefined` and every tool call
+ * throws `TypeError`. A registry key stays equal across module instances.
+ * Reverting to `Symbol()` restores that failure and neither the compiler nor
+ * the test suite rejects it.
  * @internal
  */
-export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol('@deepseek-ai/dsh-tools.scheduler')
+export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol.for('@deepseek-ai/dsh-tools.scheduler')
 
 /** Canonical error code for cancellation after a tool body was invoked. */
 export const TOOL_ABORTED = 'ABORTED'
