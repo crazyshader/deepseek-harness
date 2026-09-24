@@ -20,7 +20,7 @@
 **一条命令看清全部定制差异**（把 tag 换成当前基线版本）：
 
 ```powershell
-git diff dsh-v0.1.6-alpha.2 HEAD --stat
+git diff dsh-v0.1.7-rc.1 HEAD --stat
 ```
 
 这条命令是本文档最重要的工具。它以 tag 为基准，永远不会过期 —— 手写的文件清单会过期，它不会。合并后用它核对，比人工比对几百个文件快几个数量级。
@@ -63,11 +63,14 @@ pnpm run gen-cordis-api               # packages/extensions/tool-cordis/src/api-
 pnpm run gen-cordis-inspect-catalog   # packages/extensions/cordis-client-runner/src/client/api-catalog.ts
 pnpm run gen-cordis-catalog           # docs/subsystems/ 的生成区域（报 0 written 即已新鲜）
 pnpm run gen-config-catalog           # docs/config-catalog.md（H2 的 noAuth 会出现在这里）
+pnpm run gen-persistence-catalog      # docs/persistence-catalog.{md,zh.md,i18n.yaml} + persistence-schema.json + known-event-types.ts
 ```
+
+> **生成物里含源码行号，本分支任何加行的定制都会让它们过期。** H6 的 JSDoc 护栏给 `packages/core/tools/src/index.ts` 加了几行，于是 `config-catalog`、`persistence-catalog`、`persistence-schema.json` 里指向该文件的 `Source:` 行号全部漂移；`persistence-catalog` 陈旧还会连带让 `persistence type history` 关卡一起红（它消费前者）。这条在 dsh-v0.1.7-rc.1 之前没被记下来，导致 `gen-persistence-catalog` 漏跑过一轮。**中文侧的 `persistence-catalog.zh.md` 是生成的**（与 `config-catalog.zh.md` 不同），生成器会连 `.i18n.yaml` 一起写；`config-catalog.zh.md` 的行号仍要手工同步再重录哈希。
 
 > **`docs/config-catalog.md` 是生成物，但它的 `.zh.md` 不是。** 生成器只写英文侧，中文侧靠翻译对流程跟上。H2 的 `noAuth` 条目在中文侧是同一份英文 JSDoc（生成的代码块不翻译），取上游后要手工补回去再重录哈希 —— dsh-v0.1.6-alpha.2 这次就漏过一轮，靠 `doc-sync` 的 `config catalog` 关卡抓到。
 
-> **文件级重构是最危险的一类**，因为 git 只会告诉你「有冲突」，不会告诉你「上游把这段代码搬到别处去了」。取任何一侧都错：取我们这侧会留下一份重复实现，取上游那侧会静默丢掉定制。dsh-v0.1.6-alpha.1 这次就发生了一起，见 [H5](#h5-subprocess-spill-文件容错降级)。
+> **文件级重构是最危险的一类**，因为 git 只会告诉你「有冲突」，不会告诉你「上游把这段代码搬到别处去了」。取任何一侧都错：取我们这侧会留下一份重复实现，取上游那侧会静默丢掉定制。dsh-v0.1.6-alpha.1 这次就发生了一起，见[已退役的 H5](#h5-subprocess-spill-文件容错降级dsh-v017-rc1-起不再维护)。
 
 ### 3. 合并后核对定制完整性
 
@@ -79,6 +82,8 @@ git diff <新tag> HEAD --stat
 ```
 
 核对要点：清单里每一项的关键名字，都应该能在这份差异里找到对应的改动位置。**某项改动凭空消失了，就是被冲掉了。**
+
+反向也要看一眼：**已退役的定制不该在代码里留任何残留**（note 与本清单的散文里会提到这些名字，那是正常的，所以核对范围限定在代码，别拿 `git diff` 的全文命中当残留）。当前需要确认为零残留的：H4 的 `registerAssets` / `ClientAssetResponse`，H5 的 `newSpillFile` / `openSpillFile` 以及 `OutputCollector` 的四参数写法 `(maxBytes, maxSpillBytes, label, spillDir)`（上游签名是 `(maxBytes, label, spill?: SpillOptions)`，dsh-v0.1.7-rc.1 实测全仓 3 处调用都是三参数）。
 
 清理上游已删除包的磁盘残留（**必做**，否则会伪装成测试环境问题）：
 
@@ -117,11 +122,20 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `deliverables/workspace-changes` 里 2 个 5 秒超时 | 本机 git 在 Windows 上太慢。**串行单跑仍失败**，但它是纯上游文件，不是回归 |
 | `scripts/build-exe-for-python-sdk` | 本机 node 装在含空格路径（`C:\Program Files\nodejs`） |
 | `scripts/client-build-environment` | 5 秒超时对本机 git fixture 不够 |
-| 大批测试文件随机失败、集合每轮不同 | 并发资源争用。**串行单跑一遍确认**，别当回归。dsh-v0.1.6-alpha.2 这次两轮全量分别报 28 和 33 个失败，串行复核后只剩上表几项 |
+| `scripts/migrate-sessions-to-v4` 里 2 个 5 秒超时（`preserves none/zstd parent/child history`） | 同上，本机起子进程太慢。**串行单跑仍失败**，纯上游文件 |
+| `packages/workspace/workspace` 的 `rejects a relative candidate before creating its directory` | **仓库在 E: 盘、临时目录在 C: 盘。**用例用 `path.relative(process.cwd(), candidate)` 造「相对路径」，跨盘时 Node 返回的是绝对路径，于是校验不该拒绝也就没拒绝。**串行单跑仍失败**，纯上游文件，把仓库放到 C: 盘就会绿 |
+| 大批测试文件随机失败、集合每轮不同 | 并发资源争用。**串行单跑一遍确认**，别当回归。dsh-v0.1.6-alpha.2 两轮全量分别报 28 / 33 个失败；dsh-v0.1.7-rc.1 报 83 个，串行复核后只剩上表几项 |
+
+另有两项**关卡**红是本机文件与上游自身造成的，不是合并问题：
+
+| 关卡 | 原因 |
+|---|---|
+| `doc-sync` 的 `markdown wrap` 与 `translation pairing` | 未跟踪的本地文件 `docs/openviking-usage-guide.md`（硬换行 + 无中文配对）。把它移出 `docs/` 再跑，两项都过（实测 2221 文件无硬换行、1108 对全部一致） |
+| `hygiene` 的 `vendor rescope` | `packages/extensions/ui-cordis/src/client/CordisPreparingRow.tsx` 里的 `PropsLocale<'cordis'>` 被 token 规则当成未改名的包名。该文件与上游 tag **逐字节相同**、`scripts/rescope-vendor.ts` 也没动过，是上游自带的误报 |
 
 ### 5. 逐项功能验证
 
-按第二节清单里每项的「验证」小节执行。**高风险那 5 项都要验**，低风险的 3 项不用。
+按第二节清单里每项的「验证」小节执行。**高风险那 4 项都要验**，低风险的 3 项不用。
 
 ### 6. 回写本文档
 
@@ -135,7 +149,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 高风险改动
 
-5 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H5/H6 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
+4 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 与 H5 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
 
 ---
 
@@ -239,8 +253,17 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `ConnectionConfig.noAuth` + `Config` 的 `noAuth: z.boolean().default(false)` | `packages/client/connection/src/index.ts` | 配置项 |
 | `apply()` 里 `config?.noAuth === true ? NO_AUTH_BROWSER_AUTH : await BrowserAuth.create(...)` | 同上 | 选择点 |
 | `HostConnectionService` 构造参数类型 `BrowserAuthenticator` | `packages/client/connection/src/rpc-host.ts` | 从具体类放宽为接口 |
+| 构造函数的 `@param browserAuth` | 同上 | 见下方「注释护栏」 |
 | `--no-auth` flag + `noAuth: !options.auth` + 启动警告 | `packages/bundle/web-app/src/startup.ts` | CLI 入口。警告走 `console.log`（stdout），跟就绪行同一条流；现有的就绪行解析都用正则匹配，多一行不影响，但若将来给 stdout 做严格逐行解析，记得它在那儿 |
 | `inject: [webRuntime, webStartup]` + `noAuth: !!js ctx.webStartup.noAuth` | `packages/bundle/web-app/cordis.patch.yml` | **组合接线，typecheck 抓不到这里的错误** |
+
+**注释护栏**：构造函数的 `@param browserAuth` 必须同时描述免认证那一路，末句是：
+
+```
+   * is set, an implementation that owns no secret and admits every request.
+```
+
+上游原文只写「process token and persistent browser-session owner」—— 参数类型放宽成接口之后那是一句假陈述。这行是代码里唯一提示「这个字段可能是个免认证实现」的线索，而 `verify-export-jsdoc` 只校验 `@param` 齐不齐、描述非空、tag 没过期，**不校验描述说的是不是真的**，所以上游改写这段 JSDoc 时自动合并会干净通过、关卡也不会红。
 
 **链路完整性**：`startup.ts`（读 flag）→ `cordis.patch.yml`（传配置）→ `connection/src/index.ts`（选实现）。**三段缺一段就静默失效** —— 中间那段是 YAML，类型检查覆盖不到。
 
@@ -298,36 +321,6 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | 远程访问实测：装若干大插件后经隧道打开 Web UI | 页面正常渲染，不出现「Failed to load plugins」 | 需要真实远程环境 |
 
 **Agent Note**：[`2026-09-18-combo-body-size-limit.zh.md`](.agents/notes/implemented/architecture/2026-09-18-combo-body-size-limit.zh.md)
-
----
-
-#### H5 subprocess spill 文件容错降级
-
-**定制内容**：子进程输出的 spill 文件在创建、回填、追加写失败时，**降级为仅保留内存尾部**，不抛异常。
-
-**为什么**：长时间运行的宿主（`dsh web`）曾因此崩溃 —— 外部临时目录清理程序删掉了本进程的私有 spill 目录，下一次流溢出时 `openSync` 抛出 ENOENT，而这段代码跑在流的 `'data'` 回调里，**未捕获的异常会直接带走整个宿主进程**。spill 文件只是「完整输出的恢复产物」，值不上拿宿主进程去换。
-
-**代码关键名字**（⚠ **这一项的文件路径在上次合并中已经变过一次，务必以关键名字为准**）
-
-| 关键名字 | 当前路径 | 说明 |
-|---|---|---|
-| `OutputCollector` | `packages/subprocess/subprocess-local/src/output.ts` | **上游在 0.1.6-alpha.1 把它从 `src/spawn.ts` 整体搬到了这里** |
-| `newSpillFile()` | 同上 | 新增：拆出路径生成 |
-| `openSpillFile()` | 同上 | 新增：首次失败后**重建目录（0700）并重试一次** |
-| `spillAll()` 里三处 `try/catch` | 同上 | 创建失败 / 回填失败 / 追加写失败，各自 `discardSpill()` 后返回 |
-| `mkdirSync` 出现在导入列表 | 同上 | 上游原本不导入它，是本定制引入的 |
-
-**冲突高发点**：这一项经历过文件级重构。**下次合并若 `spawn.ts` 或 `output.ts` 出现「我们加了一大段、上游删了一大段」的冲突，先搜 `OutputCollector` 看上游把它搬到哪去了**，再决定移植目标，不要直接取某一侧。合并后可用 `pnpm run duplication` 确认没有留下重复副本。
-
-**验证**
-
-| 命令 | 预期证据 | 平台限制 |
-|---|---|---|
-| `pnpm run test packages/subprocess/subprocess-local` | 三个 fault-injection 用例通过：`degrades ... cannot be created`、`degrades ... backfilling fails`、`stops advertising ... write fails mid-stream` | ⚠ **`tests/spawn.spec.ts` 在 win32 被 `vitest.config.ts` 显式排除，Windows 本机跑不到。必须靠 CI 或 Linux/macOS** |
-| `pnpm run duplication` | 0 clones（证明移植没留重复实现） | 无 |
-| `pnpm run typecheck` | 通过（Windows 上这是唯一能覆盖该文件的本机手段） | 无 |
-
-**Agent Note**：[`2026-09-15-subprocess-spill-fault-degradation.zh.md`](.agents/notes/implemented/bug-fix/2026-09-15-subprocess-spill-fault-degradation.zh.md)（note 若已归档，以本清单为准）
 
 ---
 
@@ -394,7 +387,9 @@ pnpm dsh web --help          # 应含 --host / --port / --no-open / --no-auth / 
 pnpm dsh plugin --help       # 应含 --profile
 ```
 
-dsh-v0.1.6-alpha.2 实测：`dsh web --help` 五个 flag 都在（这同时是 H2 的**端到端证据** —— `--no-auth` 确实注册到了真实命令上，不只是源码里有）；`dsh.profile.bundles` 的语义在 `packages/boot/app-boot/src/profile-plugins.ts` 里没变，profile 目录仍是 `$DSH_HOME/profiles/<name>` 加 `cordis.patch.yml`，启动器的插件识别与快照/回滚假设都还成立。
+dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` 五个 flag 都在（这同时是 H2 的**端到端证据** —— `--no-auth` 确实注册到了真实命令上，不只是源码里有）；`dsh plugin` 仍是 `--profile <name> <pnpm-args...>` 原样转发给 pnpm，`add` / `remove` 照旧；`--dump-config` 在 `apps/cli/src/args.ts` 里还在；`dsh.profile.bundles` 的语义在 `packages/boot/app-boot/src/profile-plugins.ts`、profile 目录 `$DSH_HOME/profiles/<name>` 加 `cordis.patch.yml` 的约定在 `profile.ts` 里都没变，启动器的插件识别与快照/回滚假设都还成立。
+
+> `pnpm dsh plugin --profile web --help` 会被 pnpm 自己的参数解析吃掉、打出 pnpm 的帮助 —— 那不是 dsh 的回归。要确认 `--profile` 存在，看 `pnpm dsh plugin` 报的 `required option '--profile <name>' not specified` 就够了。
 
 **启动器自己也有两处跟合并有关的行为，都已修好**（原先是两个隐患，2026-09-15 修的）：
 
@@ -423,6 +418,18 @@ dsh-v0.1.6-alpha.2 实测：`dsh web --help` 五个 flag 都在（这同时是 H
 
 将来若某项定制被官方实现，把它从上面挪到这里并注明吸收的版本 —— 记下来是为了**下次不再白费力气去保护它**。
 
+#### H5 subprocess spill 文件容错降级（dsh-v0.1.7-rc.1 起不再维护）
+
+**原定制**：子进程输出的 spill 文件在创建、回填、追加写失败时降级为仅保留内存尾部、不抛异常；打开失败时用 `mkdirSync`（recursive、0700）**重建目录并重试一次**。动机是长期运行的宿主（`dsh web`）曾因外部临时目录清理删掉私有 spill 目录、下次溢出 `openSync` 抛 ENOENT 而崩溃 —— 这段代码跑在流的 `'data'` 回调里，未捕获异常直接带走整个宿主进程。
+
+**为什么不再维护**：上游在 dsh-v0.1.7-rc.1 自己实现了同一个容错目标，而且更完整（机制细节见下方 Agent Note，本清单不复述）。整包取上游后 `packages/subprocess/subprocess-local` **零本地改动**，下次合并不需要保护。
+
+**代价**：临时目录被外部清理程序扫过之后，该进程余下时间只剩内存尾部、不再产出完整输出的恢复文件（会有一行 `error` 日志）—— 原定制会重建目录并静默恢复。宿主不崩这条两边一致。
+
+**Agent Note**：决策记在 [`2026-09-24-subprocess-spill-recreate-retry-retired.zh.md`](.agents/notes/implemented/simplification/2026-09-24-subprocess-spill-recreate-retry-retired.zh.md)。原 note [`2026-09-15-subprocess-spill-fault-degradation.zh.md`](.agents/notes/implemented/bug-fix/2026-09-15-subprocess-spill-fault-degradation.zh.md) **保留在 `implemented/` 未归档**，机制描述已就地订正为上游代码（判据见[第四节维护约定](#四维护约定)）。下次合并若 `output.ts` 有实质改动，顺手核对这份 note。
+
+---
+
 #### H4 registerAssets 包资产路由 + PDF.js 资源移出 bundle（dsh-v0.1.6-alpha.2 起不再维护）
 
 **原定制**：① 给 `client/modules` 加 `registerAssets()`，让插件包把二进制资源放在 JS bundle 之外、经共享 `/plugins/<id>/assets/<path>` 路由提供；② 用它把 PDF.js 的 cMaps、标准字体、wasm 解码器移出客户端 bundle，按需取。
@@ -440,6 +447,34 @@ dsh-v0.1.6-alpha.2 实测：`dsh web --help` 五个 flag 都在（这同时是 H
 ---
 
 ## 三、合并历史
+
+### dsh-v0.1.7-rc.1（2026-09-24）
+
+上游 1617 个提交 vs 本分支 19 个提交，merge-base 为 `dsh-v0.1.6-alpha.2`。**主事件又是退掉一项定制**：H5 被上游用另一套机制覆盖，经用户拍板放弃（决策与代价记在[已被上游吸收](#h5-subprocess-spill-文件容错降级dsh-v017-rc1-起不再维护)）。H1 / H2 / H3 / H6 的关键名字与两处注释护栏跨 1617 个提交全部存活。
+
+**冲突只有 12 个文件**，比上游提交量预示的少得多，分三类：`rpc-host.ts` 1（保留 `BrowserAuthenticator` 并叠加上游新增的 `OperatorPeer`）、subprocess-local 5（整块取上游）、H3 的两组翻译对 6（`client/modules/README` 与 `docs/subsystems/client-modules`，取上游措辞后把 1 MiB 那几句重新嵌进去）。
+
+**踩到的坑，按教训价值排序：**
+
+1. **上游第二次用别的路解决同一个问题，判据和上次一样：看上游为什么改那片代码。** 这次上游那个提交的标题就写明了动机（`contain spill file failures instead of killing the host`），和 H5 逐字同义。仍然停下来问了用户 —— 两边都是方案级决定。
+2. **退定制撞上「决策不可回溯改写」时，不是只有归档一条路。** H5 原 note 里有两层：核心决策（不得从流回调抛出）仍成立，子决策（重建目录重试）被推翻，而且被推翻的那条**恰好是原 note 明确否决过的替代方案**。这次跟 H4 的归档走了不同的路，两条先例并列后需要判据 —— 判据写在[第四节维护约定](#四维护约定)，不在这里。
+3. **生成物里的源码行号会被本分支任何加行的定制顶偏。** H6 的 JSDoc 护栏让 `config-catalog`、`persistence-catalog`、`persistence-schema.json` 三处 `Source:` 行号漂移，而 `gen-persistence-catalog` **根本不在旧清单的生成器表里**，漏跑后 `persistence catalog` 与 `persistence type history` 两个关卡一起红（后者消费前者，报错信息看不出根因）。已补进生成器清单。
+4. **`persistence-catalog.zh.md` 是生成的，`config-catalog.zh.md` 不是。** 两个看起来同类的生成物，中文侧处理方式相反。前者生成器会连 `.i18n.yaml` 一起写；后者要手工同步行号再重录哈希。
+5. **未跟踪的本地文件会让 `doc-sync` 红，看起来像合并问题。** `docs/openviking-usage-guide.md` 同时触发 `markdown wrap` 与 `translation pairing`。判别方法是把它移出 `docs/` 再跑那两项。
+6. **关卡红也可能是上游自己的。** `hygiene` 的 `vendor rescope` 报 `ui-cordis/src/client/CordisPreparingRow.tsx` 有未改名包名，实际是 `PropsLocale<'cordis'>` 被 token 规则误判；该文件与 tag 逐字节相同、`rescope-vendor.ts` 也没动过。先用 `git diff <tag> -- <file>` 确认是不是自己碰过的。
+7. **全量失败数会随上游规模一起涨，别被绝对数吓到。** 这次 83 个失败 / 24 个文件，串行复核后只剩 5 个非回归项。新增两类记进已知表：`migrate-sessions-to-v4` 的 2 个 5 秒超时，以及 `workspace.spec` 的跨盘 `path.relative`（仓库在 E:、临时目录在 C:）。
+
+**最终验证状态**：typecheck / lint / build / duplication(0 clones) 全过；`doc-sync` 42 项里 40 项直接过、剩 2 项经排除本地文件后实测通过；`hygiene` 18 项里 17 项过、`vendor rescope` 为上游自带误报。全量单测 33869 项通过 / 83 失败，串行复核后全部归入本机环境或并发争用。定向单测 58 文件 1198 项全绿，覆盖 H1/H2/H3/H6，含 `1 MiB`、`own batch`、`NO_AUTH_BROWSER_AUTH` 三个命名用例。`dsh web --help` 五个 flag 齐全（H2 的端到端证据），`dsh plugin --profile` 与 `--dump-config`、`$DSH_HOME/profiles/<name>`、`dsh.profile.bundles` 语义均未变，启动器耦合面完好。`test:snapshot` 与 `test:e2e` **未能验证**（Windows 平台限制 + 无 key）。
+
+**合并后做了两轮 review，补了这些**（合并本身没错，问题都在 Agent Note 与本清单上）：
+
+1. **合并提交交付的是索引，不是工作区。** 这一条踩了两次：先是新建的 note 三件套一直未跟踪，后是两轮修复全留在工作区外（`MM` 状态下索引里存的还是解冲突那一版）。**每一轮修复、每次重跑生成器之后都要重新 `git add`，提交前用 `git diff --name-only` 确认它是空的。** 没有任何关卡会提醒你：`verify-translation-pairing` 默认扫磁盘而不看索引（只有 `--input index` 模式才看），所以未跟踪和未暂存的文件都照样验得过。
+2. **就地订正 note 时把机制写漏了一半。** 旧 note 的 `## Decision` 只写了「丢弃 + 上报」，漏了上游的 `spillDisabled` 永久关闭，于是同一份 note 的 Decision 与 Alternatives 自相抵触。`verify-agent-note-format` 只查小节齐不齐、不查内容自洽，这类矛盾没有任何工具会报。
+3. **补写时又把作用范围写宽了。** 第一次订正写成「完整流的恢复要等进程重启」，实际 `spillDisabled` 是 collector 级；只有「私有目录被删」那一路才升级到进程级（因为 `defaultSpillDir` 是模块级单例、不会重建），`ENOSPC`/`EEXIST` 只损失当前那条流。**订正 note 里的机制描述必须读代码，照着上游的 README 或提交标题写会漏掉作用域。**
+4. **新旧 note 之间重复。** 新 note 的 `## Verification` 一度是旧 note 同名小节的近逐字复制。交叉链接已经建立时，重述就是让两处各自漂移。
+5. **改了上游的一行 JSDoc 却没登记。** 参数类型放宽成 `BrowserAuthenticator` 后，上游原文的 `@param browserAuth` 成了假陈述，改完才发现它是一条新定制。第一轮 review 时判断成「没有失败模式、不必登记」是错的 —— **维护约定是「新增定制的同时就登记」，不区分有没有运行时风险**。现已作为 H2 的注释护栏登记。
+6. **常驻约定放进了合并历史。** 「归档 vs 保留」的判据一度写在本节的教训里，而它是要长期遵守的规则，home 在第四节维护约定 —— 放错层的后果是下次有人读约定时看不到它。
+7. **实测数字会过期。** 本文件自查那段写的 `verify-md-links` 语料规模还是 2009（现为 2200）。**清单里凡是写了实测数字的地方，每次合并都要跟着核一遍，并注明是哪个版本测的** —— 不注明版本的数字，下次没人知道该不该信。
 
 ### dsh-v0.1.6-alpha.2（2026-09-18）
 
@@ -502,13 +537,15 @@ dsh-v0.1.6-alpha.2 实测：`dsh web --help` 五个 flag 都在（这同时是 H
 
 **怎么分类**：改了官方文件 → 归到高风险，写全套（为什么 / 关键名字 / 合并时最容易出错的地方 / 验证）；只新增文件 → 归到低风险，表格里一行就够。依据是**合并时出错的风险**，不是工作量。
 
-**关键名字优先于路径**：符号名比文件路径稳定得多。0.1.6-alpha.1 那次，`LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`registerAssets`、`NO_AUTH_BROWSER_AUTH`、`OutputCollector` 跨 800 个上游提交全部存活，而文件路径变了一个；0.1.6-alpha.2 又跨 887 个提交全部存活（`registerAssets` 例外，是我们主动退掉的）。
+**关键名字优先于路径**：符号名比文件路径稳定得多。0.1.6-alpha.1 那次，`LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`registerAssets`、`NO_AUTH_BROWSER_AUTH`、`OutputCollector` 跨 800 个上游提交全部存活，而文件路径变了一个；0.1.6-alpha.2 又跨 887 个提交全部存活（`registerAssets` 例外，是我们主动退掉的）；0.1.7-rc.1 跨 1617 个提交，剩下的 `LOOPBACK_HOST`、`MAX_COMBO_BODY_BYTES`、`comboBodyBytes`、`NO_AUTH_BROWSER_AUTH`、`BrowserAuthenticator`、`TOOL_RUNTIME_SCHEDULER` 又全部存活。**但两次退定制都不是靠名字消失发现的** —— 名字好好待着，是上游换了路子。所以核对名字在位只是第一步，还得看上游为什么动那片代码。
 
 **退定制时写进「已被上游吸收」，不要删。** 删掉等于把「为什么放弃」和「代价是什么」一起删掉，下次遇到同一个痛点会从零开始重新论证一遍。编号也不重排。
 
+**退定制时那份 Agent Note 归档还是保留，看决策还成不成立**：决策本身被推翻 → 整套归档（H4 那样）；决策仍成立、只是实现者换成了上游 → 保留在 `implemented/` 并就地订正机制描述、另建一份 note 记反转（H5 那样）。判断标准是「这条决策现在还是仓库现实吗」，不是「这段代码还是我们写的吗」。保留那一路要接受一个代价：note 从此描述的是上游文件，上游重写时不会同步它。
+
 **不贴大段 diff**：代码片段会过期，而且看起来很权威，比没有更危险。例外是「定制本身就是那一小段文本」的情况，比如 H1 的注释护栏。
 
-**本文件不在任何检查关卡内。** 它是 fork 私有文件，`verify-md-links` 的语料不含它（实测 2009 个受检文件里没有它），所以内部锚点链接失效不会有人报错。改完自查一次：
+**本文件不在任何检查关卡内。** 它是 fork 私有文件，`verify-md-links` 的语料不含它（dsh-v0.1.7-rc.1 实测 2200 个受检文件里没有它），所以内部锚点链接失效不会有人报错。改完自查一次：
 
 ```powershell
 npx tsx -e "import { findViolations, anchorCache } from './scripts/verify-md-links.ts'; import { resolve } from 'node:path'; const v = findViolations(resolve('LOCAL-CUSTOMIZATIONS.md'), anchorCache()); console.log(v.length === 0 ? 'all links OK' : JSON.stringify(v, null, 1))"
