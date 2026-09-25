@@ -175,6 +175,12 @@ export class LocaleRuntime {
   private provisional: LocaleId
   /** Last explicit selection, including one awaiting an external registration. */
   private preference: LocaleId | undefined
+  /**
+   * Generation of the newest durable write. A refusal answered after a later
+   * pick has already been published must not restore anything: that later pick
+   * owns the selection and carries its own refusal handling.
+   */
+  private writeGeneration = 0
 
   /**
    * @param ctx - owning context (change events are emitted on it; the scope
@@ -250,14 +256,29 @@ export class LocaleRuntime {
    * different browser sharing the same DSH home. Only the render notification
    * is conditional: republishing an unchanged locale would churn every
    * subscriber for nothing.
+   *
+   * The publication is optimistic; a refused durable write restores the
+   * previous selection through {@link revertRefusedWrite}. Without that
+   * restoration the menu keeps showing a preference the Host never stored,
+   * until the next Host read silently replaces it — a drift the user reads as
+   * the setting forgetting itself.
    * @param id - a registered locale id; unknown ids throw.
    */
   setLocale(id: string): void {
     const match = this.catalog.get(localeKey(id))
     if (match === undefined) throw new Error(`locale "${id}" is not registered`)
+    const previous = this.preference
     this.preference = match.id
     if (this.snapshot.active !== match.id) this.publish(match.id, true)
-    void this.host?.set(LOCALE_PREFERENCE_FIELD, match.id)
+    const host = this.host
+    if (host === undefined) return
+    const generation = ++this.writeGeneration
+    void host.set(LOCALE_PREFERENCE_FIELD, match.id).then(
+      (accepted) => {
+        if (!accepted) this.revertRefusedWrite(host, generation, previous)
+      },
+      (reason: unknown) => { this.revertRefusedWrite(host, generation, previous, reason) },
+    )
   }
 
   /**
@@ -294,6 +315,38 @@ export class LocaleRuntime {
       this.catalog.delete(key)
       this.publishCatalog()
     }
+  }
+
+  /**
+   * Restore the selection a refused durable write left unstored, and report the
+   * refusal — the only signal this feature has, because a preference row owns
+   * no failure surface.
+   *
+   * A scope that is process-local by construction (`mode: 'memory'`, the
+   * persistence a non-loopback browser resolves) refuses every write by design
+   * and has no durable selection to lose, so its refusal keeps the pick: that
+   * page is expected to stay session-local.
+   * @param host - the scope that answered this write.
+   * @param generation - the write's generation; a superseded one restores nothing.
+   * @param previous - the selection standing before that write's optimistic publication.
+   * @param reason - the rejection value when the write threw rather than answering.
+   */
+  private revertRefusedWrite(
+    host: ConfigForm<LocaleSettings>,
+    generation: number,
+    previous: LocaleId | undefined,
+    reason?: unknown,
+  ): void {
+    if (generation !== this.writeGeneration) return
+    if (host.getSnapshot().mode === 'memory') return
+    this.preference = previous
+    console.error(
+      'locale: the Host refused the language preference write; restored the previous selection',
+      reason ?? '(the write was answered as not accepted)',
+    )
+    const target = this.resolveActive()
+    if (this.snapshot.active === target) return
+    this.publish(target, true)
   }
 
   /**

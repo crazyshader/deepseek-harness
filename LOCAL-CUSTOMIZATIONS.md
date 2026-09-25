@@ -109,7 +109,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 > **`hygiene` 里有两项要先 `pnpm run build` 才能过**：`publint` 与 `built package invariants` 都消费 `lib/` 产物，而流程第 3 步的 `pnpm run clean` 刚把它们删掉。顺序是 `clean` → 生成器 → `typecheck`/`lint`/`test` → `build` → `hygiene`。（旧版本清单把 publint 全局失败记成 Windows glob 问题，dsh-v0.1.6-alpha.2 实测：build 之后 16 项全过，那条已订正。）
 
-> **必须用 `pnpm run test` 启动测试。** 用 `npx vitest` 或 `pnpm exec vitest` 会让 `npm_execpath` 指向错误的包管理器，部分测试（如 `pdf-license-bundle.client.spec.ts`）会因此假失败，白白耗掉排查时间。
+> **必须用 `pnpm run test` 启动测试。** 用 `npx vitest` 或 `pnpm exec vitest` 会让 `npm_execpath` 指向错误的包管理器，部分测试会因此假失败，白白耗掉排查时间。当前的受害者是 `packages/client/ui-sidebar-documentpreview/tests/document-preview-license-bundle.client.spec.ts`（旧清单记的 `pdf-license-bundle.client.spec.ts` 是它改名前的名字），表现为 `spawnSync ... C:\Program Files\nodejs` 报错、断言 `expect(result.error).toBeUndefined()` 失败 —— **看不出跟启动方式有任何关系**。2026-09-25 又踩了一次：`npx vitest run packages/client packages/host` 报它 1 项失败，换 `pnpm run test:gui` 后 523 文件 / 7614 项全绿。
 
 > **Windows 本机跑不到的验证：**`pnpm run test:snapshot` 的期望 fixture 含 POSIX 专有的 `bash` 工具，Windows 上运行时不加载它，112 项必然全红 —— 这不是回归，但意味着**模型可见输出的验证在 Windows 上做不到**，必须靠 CI 或 Linux/macOS。同理 `packages/subprocess/subprocess-local/tests/spawn.spec.ts` 在 win32 被 `vitest.config.ts` 显式排除。
 
@@ -149,7 +149,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 高风险改动
 
-4 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 与 H5 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
+5 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 与 H5 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6/H7 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
 
 ---
 
@@ -359,6 +359,55 @@ the test suite rejects it.
 | `pnpm run test packages/core/tools packages/core/agent-loop` | 全绿（实测 36 文件 / 842 通过 / 1 跳过） | 无 |
 | `pnpm run build:lib:host` | 无类型错误（确认 TS 接受 `Symbol.for` 赋给 `unique symbol`） | 无 |
 | 用启动器（或 `pnpm dsh web`）启动后发一条触发工具调用的消息 | 工具正常执行，不出现 `reading 'prepare'` | 需要可用模型 |
+
+---
+
+#### H7 语言偏好写入失败不再静默
+
+**定制内容**：设置页选语言后，若 Host 拒绝了持久化写入，`LocaleRuntime` 把选择**回滚到上一次的值**并用 `console.error` 报告原因。进程内 scope（`mode === 'memory'`，非回环页面）例外：它按设计拒绝一切写入，选择保留。
+
+**为什么**：上游 `setLocale` 是 `void this.host?.set(...)` —— 写入结果被丢弃；而 `adopt()` 收到 Host 快照后执行 `this.preference = section.preference`，**包含 `undefined` 也照赋**，`resolveActive()` 随即回落到浏览器语言或 `en`。两条叠加的用户可见行为是：选中「中文」界面立刻变中文（乐观发布），切到别的设置分区触发 Host 重读，语言**无声无息变回英文**。没有任何提示说明写入失败过。
+
+真实触发过一次（2026-09-25）：profile 写锁 `~/.dsh/profiles/web/package.json.lock` 留下一个 0 字节孤儿文件（某进程在 `wx` 创建之后、写 pid 之前被杀），`configEditor.edit()` 每次取锁等 2 秒后抛 `timed out waiting for the writer lock`，于是**所有**设置项都写不进去。定位花的时间几乎全耗在「为什么一点错误信息都没有」上 —— 这就是这项定制要解决的问题：故障本身可以是环境问题，但它必须说话。
+
+> **这不是修复孤儿锁。** 锁的自愈（判定持有者已死并清理）没做，仍是运维动作：删掉那个 `.lock` 文件。0 字节的锁连 pid 都没有，单靠「pid 不存在即孤儿」的判定覆盖不到它。
+
+**代码关键名字**
+
+| 关键名字 | 当前路径 | 说明 |
+|---|---|---|
+| `writeGeneration` | `packages/client/locale/src/client/index.ts` | `LocaleRuntime` 私有字段，写入代次栅栏 |
+| `revertRefusedWrite()` | 同上 | 回滚 + 报告；三条判断缺一不可，见下 |
+| `setLocale()` 里 `host.set(...).then(两臂)` | 同上 | 上游原文是 `void this.host?.set(...)`，**这一行就是定制点** |
+
+**三条判断，每条都在防一个具体的错**（合并时被简化掉任何一条都会引入新缺陷）
+
+| 判断 | 防什么 |
+|---|---|
+| `generation !== this.writeGeneration` → 不回滚 | 用户连点两次语言时，先发出的那次写入若后返回失败，会把后一次的选择踩掉 |
+| `host.getSnapshot().mode === 'memory'` → 不回滚、不报错 | 非回环页面的 form **按设计**拒绝全部写入（`ui-settings/src/client/index.ts` 的 `persistence = ctx.remote.$host.isLoopback ? 'host' : 'memory'`），那种页面「只在本会话生效」是既有行为。少这条就会回归掉局域网访问场景 |
+| `this.snapshot.active === target` → 只恢复字段、不发布 | 选中的就是当前生效语言时（provisional 解析，Host 未存）原本没发布过，回滚也不该发布，否则空转全部订阅者 |
+
+**注释护栏**：`revertRefusedWrite` 的 JSDoc 必须保留解释 memory 例外的那段，末句是：
+
+```
+   * page is expected to stay session-local.
+```
+
+去掉它，下一个人会认为「拒绝就回滚」是无条件的，顺手删掉 mode 判断。
+
+**冲突高发点**：`setLocale` 是个短方法，上游改写它时自动合并很可能干净通过并把 `void this.host?.set(...)` 带回来。**合并后直接搜 `revertRefusedWrite` 确认它还在、且 `setLocale` 里真的调用了它。**编译器不报、lint 不管；locale 包的测试会红（下表 5 个用例），这是本项唯一的自动信号，**前提是别用 `npx vitest` 跑**。
+
+**同类缺陷未同步处理**：`ui-theme` 的主题偏好与字号仍是上游写法（`ui-theme/src/client/index.ts` 里两处 `void this.host.set(...)`），写失败照样静默。没跟着改是因为跨包统一需要一个共享的失败提示面（新增文案与 UI），属于方案级决定。**所以现状是不对称的**：语言行会回滚+报错，外观/字号行不会。
+
+**验证**
+
+| 命令 | 预期证据 | 平台限制 |
+|---|---|---|
+| `pnpm run test packages/client/locale` | 全绿（实测 8 文件 / 66 项）。命名用例：`restores the previous selection so the menu stops showing an unstored preference`、`restores after a write that threw instead of answering`、`restores a selection that never published, leaving the revision untouched`、`keeps the selection on a process-local scope, whose refusal is by construction`、`leaves a newer pick alone when an older write is refused afterwards` | 无 |
+| `npx vitest run --coverage --coverage.include 'packages/client/locale/src/**' packages/client/locale` | 该包 Statements / Branches / Functions / Lines 全 100%（逐文件门禁要求；此处允许用 npx，覆盖率跑不受 `npm_execpath` 影响） | 无 |
+| 人工：设置页选一次语言，随后读 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` | 出现 `- id: locale` / `config:` / `preference: zh`。**只看界面变没变中文不算证据** —— 界面在写入之前就已经切了 | 需要跑起来的 dsh |
+| 人工：故意造一个孤儿锁（`New-Item $DSH_HOME/profiles/<profile>/package.json.lock`）后再选语言 | 选择立刻弹回原值，DevTools Console 出现 `locale: the Host refused the language preference write` | 同上；**验完记得删掉那个锁文件** |
 
 ---
 

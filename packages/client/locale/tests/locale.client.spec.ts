@@ -308,6 +308,103 @@ describe('LocaleRuntime', () => {
     expect(svc.getLocale().active).toBe('zh')
   })
 
+  describe('a refused durable write', () => {
+    const refusalReporter = (): ReturnType<typeof vi.spyOn> =>
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    it('restores the previous selection so the menu stops showing an unstored preference', async () => {
+      const host = stubConfigForm<LocaleSettings>()
+      host.publish({ status: 'ready', value: { preference: 'en' }, revision: 1, writable: true })
+      const { svc, events } = make(host)
+      expect(svc.getLocale().active).toBe('en')
+      const reported = refusalReporter()
+      try {
+        host.set.mockResolvedValueOnce(false)
+        svc.setLocale('zh')
+        // The optimistic publication lands first: the pick is on screen before
+        // the Host has answered.
+        expect(svc.getLocale().active).toBe('zh')
+        await vi.waitFor(() => { expect(svc.getLocale().active).toBe('en') })
+        expect(events.map(snapshot => snapshot.active)).toEqual(['en', 'zh', 'en'])
+        expect(reported).toHaveBeenCalledOnce()
+      } finally {
+        reported.mockRestore()
+      }
+    })
+
+    it('restores after a write that threw instead of answering', async () => {
+      const host = stubConfigForm<LocaleSettings>()
+      const { svc } = make(host)
+      const reported = refusalReporter()
+      try {
+        host.set.mockRejectedValueOnce(new Error('timed out waiting for the writer lock'))
+        svc.setLocale('en')
+        expect(svc.getLocale().active).toBe('en')
+        await vi.waitFor(() => { expect(svc.getLocale().active).toBe('zh') })
+        expect(reported.mock.calls[0]).toContainEqual(expect.objectContaining({ message: expect.stringContaining('writer lock') }))
+      } finally {
+        reported.mockRestore()
+      }
+    })
+
+    it('restores a selection that never published, leaving the revision untouched', async () => {
+      // Picking the locale already active (a provisional browser resolution
+      // nothing stored) publishes nothing, so its restoration must not either.
+      const host = stubConfigForm<LocaleSettings>()
+      const { svc, events } = make(host)
+      const reported = refusalReporter()
+      try {
+        const revision = svc.getSnapshot().revision
+        host.set.mockResolvedValueOnce(false)
+        svc.setLocale('zh')
+        await vi.waitFor(() => { expect(reported).toHaveBeenCalledOnce() })
+        expect(svc.getLocale().active).toBe('zh')
+        expect(svc.getSnapshot().revision).toBe(revision)
+        expect(events).toHaveLength(0)
+      } finally {
+        reported.mockRestore()
+      }
+    })
+
+    it('keeps the selection on a process-local scope, whose refusal is by construction', async () => {
+      // A non-loopback browser resolves memory persistence: every write is
+      // refused and the page is expected to stay session-local.
+      const host = stubConfigForm<LocaleSettings>()
+      host.publish({ mode: 'memory' })
+      const { svc } = make(host)
+      const reported = refusalReporter()
+      try {
+        host.set.mockResolvedValueOnce(false)
+        svc.setLocale('en')
+        await vi.waitFor(() => { expect(host.set).toHaveBeenCalledOnce() })
+        expect(svc.getLocale().active).toBe('en')
+        expect(reported).not.toHaveBeenCalled()
+      } finally {
+        reported.mockRestore()
+      }
+    })
+
+    it('leaves a newer pick alone when an older write is refused afterwards', async () => {
+      const host = stubConfigForm<LocaleSettings>()
+      const { svc } = make(host)
+      const reported = refusalReporter()
+      try {
+        const stalled = Promise.withResolvers<boolean>()
+        host.set.mockReturnValueOnce(stalled.promise)
+        svc.setLocale('en')
+        svc.setLocale('zh')
+        expect(svc.getLocale().active).toBe('zh')
+        stalled.resolve(false)
+        await stalled.promise
+        await Promise.resolve()
+        expect(svc.getLocale().active).toBe('zh')
+        expect(reported).not.toHaveBeenCalled()
+      } finally {
+        reported.mockRestore()
+      }
+    })
+  })
+
   it('adopts a section already standing at construction and releases its subscription on dispose', async () => {
     const host = stubConfigForm<LocaleSettings>()
     host.publish({ status: 'ready', value: { preference: 'en' }, revision: 1, writable: true })
