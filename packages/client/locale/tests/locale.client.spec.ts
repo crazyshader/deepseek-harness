@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { stubConfigForm, type StubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { LocaleSettings, LocaleSnapshot } from '@deepseek-ai/dsh-client-locale/client'
@@ -309,7 +309,7 @@ describe('LocaleRuntime', () => {
   })
 
   describe('a refused durable write', () => {
-    const refusalReporter = (): ReturnType<typeof vi.spyOn> =>
+    const refusalReporter = (): MockInstance<typeof console.error> =>
       vi.spyOn(console, 'error').mockImplementation(() => {})
 
     it('restores the previous selection so the menu stops showing an unstored preference', async () => {
@@ -341,7 +341,9 @@ describe('LocaleRuntime', () => {
         svc.setLocale('en')
         expect(svc.getLocale().active).toBe('en')
         await vi.waitFor(() => { expect(svc.getLocale().active).toBe('zh') })
-        expect(reported.mock.calls[0]).toContainEqual(expect.objectContaining({ message: expect.stringContaining('writer lock') }))
+        const reason: unknown = reported.mock.calls[0]?.[1]
+        expect(reason).toBeInstanceOf(Error)
+        expect(reason instanceof Error ? reason.message : '').toContain('writer lock')
       } finally {
         reported.mockRestore()
       }

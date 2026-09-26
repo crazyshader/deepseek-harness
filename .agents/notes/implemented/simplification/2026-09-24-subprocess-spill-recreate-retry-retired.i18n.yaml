@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-24-subprocess-spill-recreate-retry-retired.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/simplification/2026-09-24-subprocess-spill-recreate-retry-retired.md
-2026-09-24-subprocess-spill-recreate-retry-retired.md: 11d805cddf870cd3e1ea987dba3b0b9564338af4
-2026-09-24-subprocess-spill-recreate-retry-retired.zh.md: 0f50984bed5ed69b7d918dccda30584c18e7f34d
+/agent-note-subprocess-spill-recreate-retry-retired:
+  en: 2371b32dd228f1dc
+  zh: f3ec299c4b4c9d3b
+/agent-note-subprocess-spill-recreate-retry-retired/problem:
+  en: e0e3d049708b063d
+  zh: e20989eb9995984b
+/agent-note-subprocess-spill-recreate-retry-retired/decision:
+  en: a59c357c1a4f6f48
+  zh: 95df9cd9e20dc507
+/agent-note-subprocess-spill-recreate-retry-retired/alternatives-considered:
+  en: e134b6e47d16bb99
+  zh: 9aa5d4b8d8198ddf
+/agent-note-subprocess-spill-recreate-retry-retired/consequences:
+  en: f19a9393a2ceba92
+  zh: 50aab921b55d3df4
+/agent-note-subprocess-spill-recreate-retry-retired/verification:
+  en: 8a3ab1c651fe96ed
+  zh: 44f3cee1244bdd03

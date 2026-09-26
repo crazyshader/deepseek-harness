@@ -1,6 +1,28 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write dsh-launcher/README.md
-README.md: 5399f383b6bb31958866930cfe3ca722dabbd578
-README.zh.md: 2f56083ab02ec2012a0a688170c8782fe145a61c
+/dsh-launcher:
+  en: ea71a184a02cfa95
+  zh: 611064dfad1847f0
+/dsh-launcher/features:
+  en: 9eb55e137a031f4b
+  zh: a4526d8b86a8d211
+/dsh-launcher/features/control-tab:
+  en: 40bb047fae5a276d
+  zh: 6cd16faa2a73ff9d
+/dsh-launcher/features/plugin-tab:
+  en: e6223d041995cbd8
+  zh: cb24db72c9a16d0d
+/dsh-launcher/development-run:
+  en: d7b346957ede7fd2
+  zh: 05b3039cf955bc92
+/dsh-launcher/package-to-exe:
+  en: d0fd5237d28bbf45
+  zh: b11c7134256ccc49
+/dsh-launcher/dependencies:
+  en: 3457d5ad879bbf14
+  zh: 1ce56344421b5719
+/dsh-launcher/platform:
+  en: 4af4f1b2d385d112
+  zh: 61139464cff56319

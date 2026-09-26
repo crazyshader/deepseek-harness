@@ -1,6 +1,37 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-12-text-form-tool-call-recovery.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-09-12-text-form-tool-call-recovery.md
-2026-09-12-text-form-tool-call-recovery.md: a22e1515188535aaed0c9add196807d625512ca2
-2026-09-12-text-form-tool-call-recovery.zh.md: ffd13cb39999b94b363246f9bd20e1d7ae0b2337
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call:
+  en: 1de526800ed4e4eb
+  zh: 239d2d31bd2cb20c
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/problem:
+  en: 862420cfb2aea767
+  zh: 5d94e688a36a71b8
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/proposal:
+  en: f503f8d18ca6c70f
+  zh: 6f69583763b5f59f
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/proposal/detection:
+  en: e94de93e9ac157c1
+  zh: 6e6441e9e116c2f4
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/proposal/recovery:
+  en: 640db4ab89a1c95c
+  zh: 4de0218f90f32f86
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/proposal/configuration:
+  en: a1a50a56a49e4fb5
+  zh: 601701b44aa980a5
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/proposal/package-layout:
+  en: 3114ed8c6d768dfc
+  zh: 3e0208231aaf636a
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/prior-art:
+  en: b9ab8e899ed57403
+  zh: 21f7d4915af7dabd
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/alternatives-considered:
+  en: 428b04b568f8ea0b
+  zh: 1a7a1c7d7a1ad594
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/acceptance-criteria:
+  en: 87754fb2648d046e
+  zh: 97fa6016431b007d
+/agent-note-recover-a-turn-that-ends-on-a-text-form-tool-call/risks:
+  en: 5486535b941542b7
+  zh: 9e2054be237fead4

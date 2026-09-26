@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-02-connection-no-auth-opt-out.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-connection-no-auth-opt-out.md
-2026-09-02-connection-no-auth-opt-out.md: 79caddf1400f8882cf8c2330056373d788fb79fa
-2026-09-02-connection-no-auth-opt-out.zh.md: 956b2d2a09647ceba3936726fa2c5261db09f0d9
+/agent-note-connection-no-auth-opt-out:
+  en: a98f236e6a0358b9
+  zh: 011da33ba1691353
+/agent-note-connection-no-auth-opt-out/problem:
+  en: 6237f34a5c2c94ef
+  zh: e08b6b6413c597c0
+/agent-note-connection-no-auth-opt-out/decision:
+  en: ff070e10826dcff4
+  zh: ac168b89f0d99bf1
+/agent-note-connection-no-auth-opt-out/alternatives-considered:
+  en: 4c3e0a65b56e87f5
+  zh: 797c20167b03adc1
+/agent-note-connection-no-auth-opt-out/consequences:
+  en: a0513e35a283b0ee
+  zh: 089ac5f3c58d8c83

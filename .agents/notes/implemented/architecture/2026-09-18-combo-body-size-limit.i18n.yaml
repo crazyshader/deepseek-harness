@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-18-combo-body-size-limit.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-18-combo-body-size-limit.md
-2026-09-18-combo-body-size-limit.md: f2a6c5f8d3f5f008165823f252b1fc2f56b8d3d7
-2026-09-18-combo-body-size-limit.zh.md: 37c7e4e0f0391d4de6241bc588fa651e9d2d4182
+/agent-note-startup-batch-bodies-are-bounded-by-served-bytes:
+  en: 260a19eb69319ece
+  zh: 48302e173e9fb853
+/agent-note-startup-batch-bodies-are-bounded-by-served-bytes/problem:
+  en: b220473a41cb2cdf
+  zh: 026a7ae8291eb16f
+/agent-note-startup-batch-bodies-are-bounded-by-served-bytes/decision:
+  en: d1db22cdf5584297
+  zh: 60616e581e4abd03
+/agent-note-startup-batch-bodies-are-bounded-by-served-bytes/alternatives-considered:
+  en: 6bcb39944eff537b
+  zh: ec863feb1263a498
+/agent-note-startup-batch-bodies-are-bounded-by-served-bytes/consequences:
+  en: c736e01f607fc261
+  zh: b2b6c1415ffcc34c
+/agent-note-startup-batch-bodies-are-bounded-by-served-bytes/verification:
+  en: 10939a992aa45d94
+  zh: bee5f2ba02b25c4a

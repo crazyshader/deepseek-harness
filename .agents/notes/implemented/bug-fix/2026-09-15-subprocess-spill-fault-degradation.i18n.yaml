@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-15-subprocess-spill-fault-degradation.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-subprocess-spill-fault-degradation.md
-2026-09-15-subprocess-spill-fault-degradation.md: d7c7388d7aa1355241541dc18ec15559bdde842a
-2026-09-15-subprocess-spill-fault-degradation.zh.md: 25be42ade7d905fffacf65a8d66da513bd8ba53e
+/agent-note-subprocess-spill-fault-degradation:
+  en: e9ba03c3becdda12
+  zh: bd58338c4ad87181
+/agent-note-subprocess-spill-fault-degradation/problem:
+  en: 32369f2ed4f1730e
+  zh: 0fed900afc23bb57
+/agent-note-subprocess-spill-fault-degradation/decision:
+  en: b25eed668d972f91
+  zh: ddd54098c47aea13
+/agent-note-subprocess-spill-fault-degradation/alternatives-considered:
+  en: 9ae7a22a76e9d514
+  zh: 0090b11802f0661b
+/agent-note-subprocess-spill-fault-degradation/consequences:
+  en: e7489c96dfdd4614
+  zh: 0ec27dfdb10f027e
+/agent-note-subprocess-spill-fault-degradation/verification:
+  en: d7169860f3ac20ac
+  zh: 00691038932b9b81

@@ -20,7 +20,7 @@
 **一条命令看清全部定制差异**（把 tag 换成当前基线版本）：
 
 ```powershell
-git diff dsh-v0.1.7-rc.1 HEAD --stat
+git diff dsh-v0.1.7-rc.2 HEAD --stat
 ```
 
 这条命令是本文档最重要的工具。它以 tag 为基准，永远不会过期 —— 手写的文件清单会过期，它不会。合并后用它核对，比人工比对几百个文件快几个数量级。
@@ -62,13 +62,15 @@ git diff --name-only --diff-filter=U   # 列出冲突文件
 pnpm run gen-cordis-api               # packages/extensions/tool-cordis/src/api-catalog.ts
 pnpm run gen-cordis-inspect-catalog   # packages/extensions/cordis-client-runner/src/client/api-catalog.ts
 pnpm run gen-cordis-catalog           # docs/subsystems/ 的生成区域（报 0 written 即已新鲜）
-pnpm run gen-config-catalog           # docs/config-catalog.md（H2 的 noAuth 会出现在这里）
+pnpm run gen-config-catalog           # docs/config-catalog.{md,zh.md,i18n.yaml}（H2 的 noAuth 会出现在这里）
 pnpm run gen-persistence-catalog      # docs/persistence-catalog.{md,zh.md,i18n.yaml} + persistence-schema.json + known-event-types.ts
 ```
 
-> **生成物里含源码行号，本分支任何加行的定制都会让它们过期。** H6 的 JSDoc 护栏给 `packages/core/tools/src/index.ts` 加了几行，于是 `config-catalog`、`persistence-catalog`、`persistence-schema.json` 里指向该文件的 `Source:` 行号全部漂移；`persistence-catalog` 陈旧还会连带让 `persistence type history` 关卡一起红（它消费前者）。这条在 dsh-v0.1.7-rc.1 之前没被记下来，导致 `gen-persistence-catalog` 漏跑过一轮。**中文侧的 `persistence-catalog.zh.md` 是生成的**（与 `config-catalog.zh.md` 不同），生成器会连 `.i18n.yaml` 一起写；`config-catalog.zh.md` 的行号仍要手工同步再重录哈希。
+> **生成物里含源码行号，本分支任何加行的定制都会让它们过期。** H6 的 JSDoc 护栏给 `packages/core/tools/src/index.ts` 加了几行，于是 `config-catalog`、`persistence-catalog`、`persistence-schema.json` 里指向该文件的 `Source:` 行号全部漂移；`persistence-catalog` 陈旧还会连带让 `persistence type history` 关卡一起红（它消费前者）。这条在 dsh-v0.1.7-rc.1 之前没被记下来，导致 `gen-persistence-catalog` 漏跑过一轮。两个 catalog 的中文侧现在都是生成的，生成器连 `.i18n.yaml` 一起写，冲突时三件套一律取上游再重跑。
 
-> **`docs/config-catalog.md` 是生成物，但它的 `.zh.md` 不是。** 生成器只写英文侧，中文侧靠翻译对流程跟上。H2 的 `noAuth` 条目在中文侧是同一份英文 JSDoc（生成的代码块不翻译），取上游后要手工补回去再重录哈希 —— dsh-v0.1.6-alpha.2 这次就漏过一轮，靠 `doc-sync` 的 `config catalog` 关卡抓到。
+> **`config-catalog.zh.md` 从 dsh-v0.1.7-rc.2 起也是生成物**（中文侧加了 `BEGIN GENERATED` 区域，`gen-config-catalog` 报「3 artifact(s)」）。此前它要手工补 H2 的 `noAuth` 条目与 H6 行号、再重录哈希；rc.2 起不用了，重跑后核对中英两侧都有 `noAuth?: boolean` 即可。
+
+> **翻译对记录格式在 dsh-v0.1.7-rc.2 换了**：`.i18n.yaml` 从「两侧整文件 git blob 哈希」改成「逐标题小节 16 位哈希」。合并时凡是本分支碰过的翻译对都会报 `merge-translation-pairing: ... not a valid two-hash pairing record`，本分支独有的翻译对（`dsh-launcher/README`、各定制 note）也要用 `pnpm run verify-translation-pairing --write <对应.md>` 重录成新格式，否则报 `malformed consistency record`。
 
 > **文件级重构是最危险的一类**，因为 git 只会告诉你「有冲突」，不会告诉你「上游把这段代码搬到别处去了」。取任何一侧都错：取我们这侧会留下一份重复实现，取上游那侧会静默丢掉定制。dsh-v0.1.6-alpha.1 这次就发生了一起，见[已退役的 H5](#h5-subprocess-spill-文件容错降级dsh-v017-rc1-起不再维护)。
 
@@ -92,6 +94,8 @@ pnpm run clean
 ```
 
 上游删包后，git 会正确删掉跟踪，但 `lib/` 构建产物会留在磁盘上，让 `constraints` 检查报「这里应该有个包却没有 package.json」，还会让若干测试报出看似无关的模块解析错误。
+
+> **上游 dsh-v0.1.7-rc.2 的 `pnpm run clean` 本身会失败**，本分支已用 [H8](#h8-clean-可用的-outdir) 修掉。合并后若再报 `clean: expected TypeScript outDir to end in /types: <路径>`，说明上游又加了一个不守约定的 tsconfig，照 H8 的办法改它。
 
 ### 4. 跑自动检查
 
@@ -124,6 +128,8 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `scripts/client-build-environment` | 5 秒超时对本机 git fixture 不够 |
 | `scripts/migrate-sessions-to-v4` 里 2 个 5 秒超时（`preserves none/zstd parent/child history`） | 同上，本机起子进程太慢。**串行单跑仍失败**，纯上游文件 |
 | `packages/workspace/workspace` 的 `rejects a relative candidate before creating its directory` | **仓库在 E: 盘、临时目录在 C: 盘。**用例用 `path.relative(process.cwd(), candidate)` 造「相对路径」，跨盘时 Node 返回的是绝对路径，于是校验不该拒绝也就没拒绝。**串行单跑仍失败**，纯上游文件，把仓库放到 C: 盘就会绿 |
+| `subagent-codex/real-product`（6 项）、`subagent-claude-code/real-product`（2 项） | 调用本机真实安装的 codex / claude CLI。codex 报 `failed to initialize sqlite state runtime` 与 `could not create PATH aliases (os error 5)`。**串行单跑仍失败**，纯上游文件（dsh-v0.1.7-rc.2 实测） |
+| `build:web` / `documentation build` 报 esbuild `remove ...\esbuild-<hash>: Access is denied`；git hook 报 `sh.exe ... NtCreateDirectoryObject ... 0xC0000022` | **dsh 自己的 Windows ACL 沙箱把本仓库当过工作区**，在根目录留下常驻的 `Low Mandatory Level` 可继承标签和 `S-1-4-941875597-941718598`（= `workspaceWriteSid('E:\ai\deepseek-harness')`）写 ACE。标签继承到 `node_modules` 里的 exe，Windows 按文件标签把 `esbuild.exe`、`lefthook.exe` 降成低完整性进程，于是删不掉 `%TEMP%` 里的文件、`sh.exe` 建不了命名对象。判别：`icacls E:\ai\deepseek-harness` 出现 `Mandatory Label\Low Mandatory Level`。**修复**（`icacls` 撤不掉，要走沙箱模块，停掉 `dsh web` 后执行，约 16 秒）：`npx tsx -e "import { AclWriteGrant } from './packages/sandbox/sandbox-windows-acl/src/grant.ts'; import { revokeWrite } from './packages/sandbox/sandbox-windows-acl/src/acl.ts'; const g = AclWriteGrant.create('<icacls 里那个 S-1-4 SID>') as any; revokeWrite(g.api, 'E:\\ai\\deepseek-harness', g.sidPtr)"`。根目录上的 `Everyone:(CI)(DENY)(S,DC)` 是同一次授权留下的删除拒绝项，不影响构建，保留未动。**别再把 dsh 源码仓库当 dsh 的工作区开沙箱**，否则标签会被重新打上（2026-09-26 实测定位并修复） |
 | 大批测试文件随机失败、集合每轮不同 | 并发资源争用。**串行单跑一遍确认**，别当回归。dsh-v0.1.6-alpha.2 两轮全量分别报 28 / 33 个失败；dsh-v0.1.7-rc.1 报 83 个，串行复核后只剩上表几项 |
 
 另有两项**关卡**红是本机文件与上游自身造成的，不是合并问题：
@@ -131,7 +137,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | 关卡 | 原因 |
 |---|---|
 | `doc-sync` 的 `markdown wrap` 与 `translation pairing` | 未跟踪的本地文件 `docs/openviking-usage-guide.md`（硬换行 + 无中文配对）。把它移出 `docs/` 再跑，两项都过（实测 2221 文件无硬换行、1108 对全部一致） |
-| `hygiene` 的 `vendor rescope` | `packages/extensions/ui-cordis/src/client/CordisPreparingRow.tsx` 里的 `PropsLocale<'cordis'>` 被 token 规则当成未改名的包名。该文件与上游 tag **逐字节相同**、`scripts/rescope-vendor.ts` 也没动过，是上游自带的误报 |
+| `hygiene` 的 `vendor rescope` | `packages/extensions/ui-cordis/src/client/CordisPreparingRow.tsx` 里的 `PropsLocale<'cordis'>` 被 token 规则当成未改名的包名。该文件与上游 tag **逐字节相同**、`scripts/rescope-vendor.ts` 也没动过，是上游自带的误报。**dsh-v0.1.7-rc.2 实测已不再报**（18 项全过） |
 
 ### 5. 逐项功能验证
 
@@ -149,7 +155,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 高风险改动
 
-5 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 与 H5 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6/H7 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
+6 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 与 H5 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6/H7/H8 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
 
 ---
 
@@ -411,6 +417,25 @@ the test suite rejects it.
 
 ---
 
+#### H8 clean 可用的 outDir
+
+**定制内容**：`tsconfig.desktop-keyboard-tests.json` 的 `outDir` 由 `lib/desktop-keyboard-test-types` 改为 `lib/desktop-keyboard-tests/types`。
+
+**为什么**：`scripts/clean.ts` 从根 `tsconfig.json` 沿 `references` 遍历全部 tsconfig，要求每个 `outDir` 以 `/types` 结尾（据此推出要删的上一级目录），不符合就直接抛错退出。上游在 dsh-v0.1.7-rc.2 新增的这个 tsconfig（经 `tsconfig.client.json` 引用）不守这条约定，于是 `pnpm run clean` 必失败，启动器的「构建」按钮（`pnpm run clean && pnpm run build`）第一步就中止。上游 CI 不跑 `clean`，所以没被发现；截至 2026-09-24 的上游 master 仍未修。改路径而不改 `clean.ts`：一行、不改变任何检查的严格度。
+
+**代码关键名字**：`tsconfig.desktop-keyboard-tests.json` 的 `"outDir": "lib/desktop-keyboard-tests/types"`。全仓没有别处引用旧路径。
+
+**冲突高发点**：上游一旦自己修（改路径或放宽 `clean.ts`），这里会冲突或变得多余 —— 上游修了就取上游，并把本项挪到「已被上游吸收」。
+
+**验证**
+
+| 命令 | 预期证据 | 平台限制 |
+|---|---|---|
+| `pnpm run clean` | 输出 `clean: removed <n> paths`，退出码 0 | 无 |
+| `pnpm run typecheck` | 通过（该项目经 `tsconfig.client.json` 纳入） | 无 |
+
+---
+
 ### 低风险改动
 
 3 项，**都是新增的文件，官方永远不会碰，不会产生冲突**。合并后不用逐项检查，`git diff <tag> HEAD --stat` 里看到它们还在就行。
@@ -496,6 +521,23 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 ---
 
 ## 三、合并历史
+
+### dsh-v0.1.7-rc.2（2026-09-26）
+
+上游 346 个提交 vs 本分支 21 个提交，merge-base 为 `dsh-v0.1.7-rc.1`。回退点 `backup/dsh-launcher-pre-0.1.7-rc.2`。**没有源码冲突**，H1/H2/H3/H6/H7 的关键名字与四处注释护栏全部自动合并存活；H4/H5 零残留；上游新增的 `127.0.0.1` 全是 mock 服务器或绑定地址，没有新的就绪行字面断言。
+
+**冲突 14 个文件，只有两类**：生成物 5（`config-catalog.md/.zh.md`、`persistence-catalog` 三件套、`persistence-schema.json`，取上游重跑）与翻译对记录 9（合并驱动器拒绝旧格式哈希，正文都已干净合并，逐对 `--write` 重录）。
+
+**踩到的坑：**
+
+1. **翻译对记录换了格式。**上游把 `.i18n.yaml` 从整文件 blob 哈希改成逐小节哈希，本分支独有的翻译对（`dsh-launcher/README` 与 5 份定制 note）虽然没冲突，也全部变成 `malformed`。已在流程节登记。
+2. **H7 的 README 漏了中文侧。**上次 H7 提交只改了 `packages/client/locale/README.md` 的「Preference resolution」一段，`.zh.md` 没跟，新格式的逐小节哈希一眼抓到了。本次补译。
+3. **H7 的测试没过 lint、`api-catalog.ts` 没重跑。**`locale.client.spec.ts` 用 `ReturnType<typeof vi.spyOn>` 标注 spy，泛型未实参化时退化为 `any`，报 17 处 `no-unsafe-*`；改为 `MockInstance<typeof console.error>`，并把 `expect.stringContaining` 那处断言改成显式 `instanceof Error` 检查。`gen-cordis-inspect-catalog` 也因 H7 给 `setLocale` 加的 JSDoc 陈旧了一段。**教训：新增定制后 lint 与生成器也要跑，不只是定向单测。**
+4. **合并中途不能 `git stash`。**索引里有未解决条目时 stash 报 `could not write index`。要在合并中给含本地未提交改动的文件重录哈希，做法是备份工作区文件 → `git checkout HEAD -- <文件>` → `--write` → `git add` 记录 → 拷回备份。
+5. **`pnpm run clean` 失败是上游 bug**，已作为 [H8](#h8-clean-可用的-outdir) 修掉。
+6. **esbuild 与 git hook 的「拒绝访问」是 dsh 沙箱留在本仓库上的 Low 完整性标签**，一度被当成无解的本机环境问题记下。线索是两处报错都是「同一用户、同一文件却没权限」；把 `esbuild.exe` 拷到仓库外就能跑，一步定位到文件标签。撤销方法记在流程节的已知表里。**教训：Windows 上的 `Access is denied` 先用 `icacls` 看一眼 `Mandatory Label`。**
+
+**最终验证状态**（本机实测）：typecheck / lint / duplication(0 clones) / hygiene(18/18) 全过。全量单测 36674 项通过 / 73 失败（22 文件），已知表之外的 6 个文件串行复核 23 文件 910 项全绿，剩余均归入已知表。定向单测 67 文件 1278 项全绿（web-app、connection、modules、tools、agent-loop、locale），含 `1 MiB`、`own batch`、`NO_AUTH_BROWSER_AUTH` 命名用例。`dsh web --help` 五个 flag 齐全、`dsh plugin` 仍要求 `--profile`、`--dump-config` 在位。`doc-sync` 42 项 39 过：`markdown wrap`/`translation pairing` 是本地未跟踪文件与 proposed note 的未提交改动，`documentation build` 当时因 esbuild 标签问题失败。撤销标签后 `pnpm run clean && pnpm run build` 完整通过、`apps/web/dist` 已生成（`documentation build` 未重跑）。**未能验证**：`test:snapshot`（Windows）、`test:e2e`（无 key），以及 H2/H6/H7 的人工实跑项。
 
 ### dsh-v0.1.7-rc.1（2026-09-24）
 
