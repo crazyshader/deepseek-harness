@@ -211,3 +211,40 @@ def shell_quote(arg: str) -> str:
     if any(ch.isspace() for ch in arg):
         return f'"{arg}"'
     return arg
+
+
+# npm registry 版本/范围 spec 的粗略判定：不含 scheme（如 github:、link:、file:）、
+# 不含路径分隔符、不含 URL 协议头。命中即认为是普通 npm 依赖 spec（如 "^1.66.3"、
+# "1.2.0"、"latest"），可以查询 registry 上的最新版本；否则（git/tarball/本地路径）
+# 判定为不可更新——这类来源没有可比较的“最新版本”概念。
+_NON_REGISTRY_MARKERS = ("://", "github:", "gitlab:", "bitbucket:", "git:", "link:", "file:")
+
+
+def is_registry_spec(spec: str) -> bool:
+    """判断一个已安装依赖的 spec 是否来自 npm registry（而非 git/tarball/本地路径）。
+
+    只有 registry 来源的插件才有“最新版本”可查、可被“更新”功能处理
+    （更新 = 卸载后重装 `<name>@latest`，对非 registry 来源无意义）。
+    """
+    lowered = spec.strip().lower()
+    if not lowered:
+        return False
+    if any(marker in lowered for marker in _NON_REGISTRY_MARKERS):
+        return False
+    if "/" in lowered or "\\" in lowered:
+        return False
+    return True
+
+
+def bare_version(spec: str) -> str | None:
+    """从依赖 spec 里剥离范围前缀（^ ~ = 空格等），取出裸版本号。
+
+    用于把 "^0.3.1" 这样的 spec 与查到的最新版本 "0.3.1" 做相等比较——
+    仅当两者不同才算“有更新”，否则范围符号会让相同版本被误判为可更新。
+    spec 不是形如 "^1.2.3" 的精确版本号（例如 "latest"、"workspace:*"）时返回 None，
+    调用方遇到 None 应保守地认为“无法判断，仍展示为可更新”而不是隐藏。
+    """
+    import re
+
+    match = re.match(r"^[\^~=\s]*(\d+\.\d+\.\d+(?:[-+][\w.]+)?)$", spec.strip())
+    return match.group(1) if match else None

@@ -124,6 +124,18 @@ class _Step:
     service: bool = False
 
 
+@dataclass
+class _BatchItem:
+    """批量任务（检查更新 / 更新）中的一个插件条目：按顺序执行其若干步骤。
+
+    与 _Step 组成的任务链不同，批量任务里一个条目的步骤失败不中止整批——
+    只把这一条目标记为失败，继续处理下一个（决策：单个失败跳过继续）。
+    """
+
+    name: str
+    steps: list[_Step]
+
+
 class LauncherWindow(QMainWindow):
     """启动器主窗口。"""
 
@@ -142,6 +154,16 @@ class LauncherWindow(QMainWindow):
         # 插件列表的缓存（刷新按钮状态时避免重复读盘）
         self._latest_plugin_name: str | None = None
         self._snapshot_count = 0
+        # 插件名 -> 最新版本；仅含“检查更新”查到有效结果的 registry 来源插件。
+        # 清空即代表“尚未检查”，此时更新相关按钮禁用。
+        self._latest_versions: dict[str, str] = {}
+        # 是否已执行过一次“检查更新”；决定“更新选中/更新所有”是否可点
+        # （区分“没查过”与“查过但恰好全部最新”，两者 _latest_versions 都可能是空字典）。
+        self._updates_checked = False
+        # 当前批量任务（检查更新 / 更新选中 / 更新所有）：
+        # {"kind": "check"|"update", "items": [_BatchItem,...], "index": int,
+        #  "results": {name: True|False}, "current_step": int}；None 表示无批量任务在跑。
+        self._batch: dict | None = None
         # 服务状态缓存：(has_project, installed, built, stale, running_port)
         self._service_status: tuple[bool, bool, bool, bool, bool] | None = None
 
@@ -264,6 +286,9 @@ class LauncherWindow(QMainWindow):
         plugins_group = QGroupBox("第三方插件（web profile，按安装顺序；卸载不拍快照）")
         pg = QHBoxLayout(plugins_group)
         self.plugin_list = QListWidget()
+        # 多选：支撑“更新选中插件”对多个条目批量操作；Ctrl/Shift 多选，
+        # 单击仍是单选，不影响既有的卸载/回滚单选流程（它们只看 currentItem）。
+        self.plugin_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.plugin_list.itemSelectionChanged.connect(self._refresh_button_states)
         pg.addWidget(self.plugin_list, stretch=1)
         pb = QVBoxLayout()
@@ -279,6 +304,16 @@ class LauncherWindow(QMainWindow):
         self.plugin_remove_latest_btn = QPushButton("卸载最近并重试")
         self.plugin_remove_latest_btn.clicked.connect(self._on_plugin_remove_latest)
         pb.addWidget(self.plugin_remove_latest_btn)
+        pb.addSpacing(12)
+        self.plugin_check_updates_btn = QPushButton("检查更新")
+        self.plugin_check_updates_btn.clicked.connect(self._on_check_updates)
+        pb.addWidget(self.plugin_check_updates_btn)
+        self.plugin_update_selected_btn = QPushButton("更新选中插件")
+        self.plugin_update_selected_btn.clicked.connect(lambda: self._on_update(selected_only=True))
+        pb.addWidget(self.plugin_update_selected_btn)
+        self.plugin_update_all_btn = QPushButton("更新所有插件")
+        self.plugin_update_all_btn.clicked.connect(lambda: self._on_update(selected_only=False))
+        pb.addWidget(self.plugin_update_all_btn)
         pb.addStretch(1)
         pg.addLayout(pb)
         root.addWidget(plugins_group, stretch=1)
@@ -542,6 +577,192 @@ class LauncherWindow(QMainWindow):
         ]
         self._run_chain("回滚到安装前状态并重试", steps, on_success=self._refresh_plugin_lists)
 
+    # ---- 通用：批量任务（检查更新 / 更新，单项失败不中止整批）----
+
+    def _start_batch(self, kind: str, items: list["_BatchItem"], current_specs: dict[str, str] | None = None) -> None:
+        """启动一个批量任务：逐条目顺序执行，一个条目的步骤全部成功才算成功；
+        失败的条目记录原因后继续处理下一个条目，不中止整批（决策 7）。
+        """
+        if self.process is not None or self._batch is not None:
+            self._warn("已有任务正在运行，请先等待完成。")
+            return
+        if not items:
+            return
+        self._batch = {
+            "kind": kind, "items": items, "index": 0, "step": 0,
+            "results": {}, "reasons": {}, "output": "",
+            "current_specs": current_specs or {},
+        }
+        self._refresh_button_states()
+        self._start_batch_item()
+
+    def _start_batch_item(self) -> None:
+        batch = self._batch
+        item = batch["items"][batch["index"]]
+        batch["step"] = 0
+        batch["output"] = ""
+        total = len(batch["items"])
+        verb = "检查" if batch["kind"] == "check" else "更新"
+        self.status_label.setText(f"正在{verb} {item.name}（{batch['index'] + 1}/{total}）")
+        self._append_log(f"\n----- [{verb}] {item.name} ({batch['index'] + 1}/{total}) -----\n")
+        self._start_batch_step()
+
+    def _start_batch_step(self) -> None:
+        batch = self._batch
+        item = batch["items"][batch["index"]]
+        step = item.steps[batch["step"]]
+        self._append_log(f"$ {step.label}\n")
+        proc = QProcess(self)
+        proc.setWorkingDirectory(str(step.cwd))
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+        proc.readyReadStandardOutput.connect(lambda p=proc: self._on_batch_ready_read(p))
+        proc.finished.connect(lambda code, status, p=proc: self._on_batch_step_finished(p, code))
+        self.process = proc
+        self._refresh_button_states()
+        proc.start(step.program, step.args)
+
+    def _on_batch_ready_read(self, proc: QProcess) -> None:
+        if proc is not self.process or self._batch is None:
+            return
+        data = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+        self._batch["output"] += data
+        self._append_log(data)
+
+    def _on_batch_step_finished(self, proc: QProcess, code: int) -> None:
+        if proc is not self.process or self._batch is None:
+            return
+        self.process = None
+        batch = self._batch
+        item = batch["items"][batch["index"]]
+        if code != 0:
+            batch["results"][item.name] = False
+            batch["reasons"][item.name] = f"退出码 {code}"
+            self._append_log(f"[{item.name}] 失败（退出码 {code}），跳过并继续下一项\n")
+            self._advance_batch()
+            return
+        batch["step"] += 1
+        if batch["step"] < len(item.steps):
+            self._start_batch_step()
+            return
+        # 该条目全部步骤成功
+        if batch["kind"] == "check":
+            version = batch["output"].strip().splitlines()[-1].strip() if batch["output"].strip() else ""
+            current = batch.get("current_specs", {}).get(item.name, "")
+            current_version = pm.bare_version(current)
+            # 只有查到版本号、且与当前 spec 的裸版本确实不同才算“有更新”；
+            # current_version 为 None（spec 不是精确版本号，如 workspace:* 或 latest）
+            # 时无法判断，保守地仍展示为可更新。
+            if version and (current_version is None or current_version != version):
+                self._latest_versions[item.name] = version
+        batch["results"][item.name] = True
+        self._advance_batch()
+
+    def _advance_batch(self) -> None:
+        batch = self._batch
+        batch["index"] += 1
+        if batch["index"] < len(batch["items"]):
+            self._start_batch_item()
+        else:
+            self._finish_batch()
+
+    def _finish_batch(self) -> None:
+        batch = self._batch
+        self._batch = None
+        succeeded = [name for name, ok in batch["results"].items() if ok]
+        failed = [name for name, ok in batch["results"].items() if not ok]
+        verb = "检查更新" if batch["kind"] == "check" else "更新"
+        summary = f"\n===== [{verb}] 完成：成功 {len(succeeded)} 个，失败 {len(failed)} 个 =====\n"
+        for name in failed:
+            summary += f"  - {name}: {batch['reasons'].get(name, '未知原因')}\n"
+        self._append_log(summary)
+        if batch["kind"] == "check":
+            self._updates_checked = True
+            self._refresh_plugin_lists_preserve_versions()
+        else:
+            self._refresh_plugin_lists()
+        self._reset_to_idle()
+
+    def _refresh_plugin_lists_preserve_versions(self) -> None:
+        """“检查更新”完成后刷新列表文案，但不像 _refresh_plugin_lists 那样清空
+        刚查到的版本缓存——那样会让刚显示的“可更新至 X”立刻消失。
+        """
+        versions = dict(self._latest_versions)
+        checked = self._updates_checked
+        self._refresh_plugin_lists()
+        self._latest_versions.update(versions)
+        self._updates_checked = checked
+        profile = self._profile()
+        for row in range(self.plugin_list.count()):
+            item = self.plugin_list.item(row)
+            name = str(item.data(Qt.ItemDataRole.UserRole))
+            spec = str(item.data(Qt.ItemDataRole.UserRole + 1))
+            item.setText(self._plugin_item_text(name, spec))
+        self._refresh_button_states()
+
+    def _on_check_updates(self) -> None:
+        """对全部 npm registry 来源的已装插件批量查询最新版本（决策 5）。"""
+        if self._project_root() is None:
+            return
+        profile = self._profile()
+        specs = dict(pm.installed_plugins(profile))
+        names = [name for name in specs if pm.is_registry_spec(specs[name])]
+        if not names:
+            self._warn("没有可检查更新的插件（均为非 npm 来源，或未安装任何第三方插件）。")
+            return
+        self._latest_versions.clear()
+        # --config.fetch-retries=0：pnpm 默认对网络失败重试且退避到分钟级
+        # （ECONNRESET 后依次等 10s、1min），会让单个插件的查询卡住整批很久。
+        # 查询失败本就按“暂时不知道有没有更新”处理（不阻断整批），所以关掉
+        # 重试更符合这条命令的用途：宁可快速失败换下一个，不做长时间重试。
+        items = [
+            _BatchItem(name=name, steps=[
+                _Step(
+                    f"pnpm view {name} version", "cmd",
+                    ["/c", f"pnpm view {pm.shell_quote(name)} version --config.fetch-retries=0"], profile,
+                ),
+            ])
+            for name in names
+        ]
+        self._start_batch("check", items, current_specs=specs)
+
+    def _on_update(self, selected_only: bool) -> None:
+        """更新选中插件或全部可更新插件：卸载后重装 `<name>@latest`（决策 1/2）。
+
+        更新前必须已执行过“检查更新”——按钮在未检查时禁用，这里再兜底校验一次。
+        """
+        if not self._updates_checked:
+            self._warn("请先点击“检查更新”。")
+            return
+        if self._project_root() is None:
+            return
+        profile = self._profile()
+        if selected_only:
+            names = [
+                str(item.data(Qt.ItemDataRole.UserRole))
+                for item in self.plugin_list.selectedItems()
+                if pm.is_registry_spec(str(item.data(Qt.ItemDataRole.UserRole + 1)))
+            ]
+            if not names:
+                self._warn("请先在列表中选择至少一个可更新的插件（非 npm 来源的插件不支持更新）。")
+                return
+        else:
+            names = self._updatable_plugin_names(profile)
+            if not names:
+                self._warn("没有可更新的插件。")
+                return
+        suffix = f"（共 {len(names)} 个）" if len(names) > 1 else ""
+        if not self._confirm("确认更新", f"将卸载并重装以下插件到最新版本{suffix}：\n\n{chr(10).join(names)}"):
+            return
+        self._stop_service_quiet()
+        items = [
+            _BatchItem(name=name, steps=[
+                _Step(f"卸载 {name}", "cmd", ["/c", f"pnpm dsh plugin --profile web remove {name}"], profile),
+                _Step(f"安装 {name}@latest", "cmd", ["/c", f"pnpm dsh plugin --profile web add {pm.shell_quote(name)}@latest"], profile),
+            ])
+            for name in names
+        ]
+        self._start_batch("update", items)
+
     # ---- 通用：任务链 ----
 
     def _run_chain(
@@ -658,12 +879,19 @@ class LauncherWindow(QMainWindow):
     # ---- 插件列表与按钮状态 ----
 
     def _refresh_plugin_lists(self) -> None:
-        """重读 profile 与快照目录，刷新两个列表及其缓存。"""
+        """重读 profile 与快照目录，刷新两个列表及其缓存。
+
+        刷新会让“检查更新”的结果失去意义（列表本身变了），所以顺带清空
+        已知的最新版本缓存，更新相关按钮回到“需要重新检查”的禁用状态。
+        """
         profile = self._profile()
+        self._latest_versions.clear()
+        self._updates_checked = False
         self.plugin_list.clear()
         for name, spec in pm.installed_plugins(profile):
-            item = QListWidgetItem(f"{name}  ({spec})")
+            item = QListWidgetItem(self._plugin_item_text(name, spec))
             item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setData(Qt.ItemDataRole.UserRole + 1, spec)
             self.plugin_list.addItem(item)
         self.snap_list.clear()
         snaps = pm.list_snapshots(profile)
@@ -674,6 +902,17 @@ class LauncherWindow(QMainWindow):
         self._latest_plugin_name = pm.latest_plugin(profile)
         self._snapshot_count = len(snaps)
         self._refresh_button_states()
+
+    def _plugin_item_text(self, name: str, spec: str) -> str:
+        """插件列表一行的展示文案：装了/查到更新时附加“→ 最新版本”。"""
+        latest = self._latest_versions.get(name)
+        if latest is not None:
+            return f"{name}  ({spec})  → 可更新至 {latest}"
+        return f"{name}  ({spec})"
+
+    def _updatable_plugin_names(self, profile: Path) -> list[str]:
+        """当前已装插件里，来源判定为可更新（npm registry）的插件名列表。"""
+        return [name for name, spec in pm.installed_plugins(profile) if pm.is_registry_spec(spec)]
 
     # ---- 服务状态探测与刷新 ----
 
@@ -709,6 +948,8 @@ class LauncherWindow(QMainWindow):
         st = self._service_status
         if st is None:
             return
+        if self._batch is not None:
+            return  # 批量任务自己维护状态行文案（“正在更新 X（i/N）”），不被覆盖
         has_project, installed, built, stale, running_port = st
         if self.process is not None and self.is_serving:
             self.status_label.setText("运行中: 启动")
@@ -774,11 +1015,14 @@ class LauncherWindow(QMainWindow):
             self.plugin_uninstall_btn.setEnabled(False)
             self.plugin_uninstall_restart_btn.setEnabled(False)
             self.plugin_remove_latest_btn.setEnabled(False)
+            self.plugin_check_updates_btn.setEnabled(False)
+            self.plugin_update_selected_btn.setEnabled(False)
+            self.plugin_update_all_btn.setEnabled(False)
             self.snap_rollback_btn.setEnabled(False)
             self.snap_rollback_latest_btn.setEnabled(False)
             return
         has_project, installed, built, _stale, running_port = st
-        blocking = self.process is not None
+        blocking = self.process is not None or self._batch is not None
         running = running_port or self.is_serving
         self.install_btn.setEnabled(has_project and not blocking)
         self.build_btn.setEnabled(has_project and installed and not blocking)
@@ -795,6 +1039,19 @@ class LauncherWindow(QMainWindow):
         self.plugin_uninstall_restart_btn.setEnabled(has_project and plugin_selected and not blocking)
         self.plugin_remove_latest_btn.setEnabled(
             has_project and not blocking and self._latest_plugin_name is not None
+        )
+        self.plugin_check_updates_btn.setEnabled(has_project and not blocking)
+        # “更新选中/更新所有”要求已执行过一次“检查更新”（_latest_versions 非空即代表
+        # 至少查到一个可更新项；空字典既可能是“没查过”也可能是“查过但无更新”，
+        # 用独立标志区分，避免刚检查完发现全部最新时按钮又变回禁用误导用户）。
+        checked = self._updates_checked
+        selected_updatable = any(
+            pm.is_registry_spec(str(item.data(Qt.ItemDataRole.UserRole + 1)))
+            for item in self.plugin_list.selectedItems()
+        )
+        self.plugin_update_selected_btn.setEnabled(has_project and not blocking and checked and selected_updatable)
+        self.plugin_update_all_btn.setEnabled(
+            has_project and not blocking and checked and bool(self._updatable_plugin_names(self._profile()))
         )
         snap_selected = self.snap_list.currentItem() is not None
         self.snap_rollback_btn.setEnabled(has_project and snap_selected and not blocking)
