@@ -20,7 +20,7 @@
 **一条命令看清全部定制差异**（把 tag 换成当前基线版本）：
 
 ```powershell
-git diff dsh-v0.1.7-rc.2 HEAD --stat
+git diff dsh-v0.2.0-rc.2 HEAD --stat
 ```
 
 这条命令是本文档最重要的工具。它以 tag 为基准，永远不会过期 —— 手写的文件清单会过期，它不会。合并后用它核对，比人工比对几百个文件快几个数量级。
@@ -95,7 +95,7 @@ pnpm run clean
 
 上游删包后，git 会正确删掉跟踪，但 `lib/` 构建产物会留在磁盘上，让 `constraints` 检查报「这里应该有个包却没有 package.json」，还会让若干测试报出看似无关的模块解析错误。
 
-> **上游 dsh-v0.1.7-rc.2 的 `pnpm run clean` 本身会失败**，本分支已用 [H8](#h8-clean-可用的-outdir) 修掉。合并后若再报 `clean: expected TypeScript outDir to end in /types: <路径>`，说明上游又加了一个不守约定的 tsconfig，照 H8 的办法改它。
+> **合并后若 `pnpm run clean` 报 `clean: expected TypeScript outDir to end in /types: <路径>`**，说明上游又加了一个不守约定的 tsconfig，照[已退役 H8](#h8-clean-可用的-outdirdsh-v020-rc2-起不再维护) 的办法把它的 `outDir` 改成以 `/types` 结尾。
 
 ### 4. 跑自动检查
 
@@ -155,7 +155,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 ### 高风险改动
 
-6 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4 与 H5 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6/H7/H8 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
+5 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4、H5、H8 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6/H7 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
 
 ---
 
@@ -417,25 +417,6 @@ the test suite rejects it.
 
 ---
 
-#### H8 clean 可用的 outDir
-
-**定制内容**：`tsconfig.desktop-keyboard-tests.json` 的 `outDir` 由 `lib/desktop-keyboard-test-types` 改为 `lib/desktop-keyboard-tests/types`。
-
-**为什么**：`scripts/clean.ts` 从根 `tsconfig.json` 沿 `references` 遍历全部 tsconfig，要求每个 `outDir` 以 `/types` 结尾（据此推出要删的上一级目录），不符合就直接抛错退出。上游在 dsh-v0.1.7-rc.2 新增的这个 tsconfig（经 `tsconfig.client.json` 引用）不守这条约定，于是 `pnpm run clean` 必失败，启动器的「构建」按钮（`pnpm run clean && pnpm run build`）第一步就中止。上游 CI 不跑 `clean`，所以没被发现；截至 2026-09-24 的上游 master 仍未修。改路径而不改 `clean.ts`：一行、不改变任何检查的严格度。
-
-**代码关键名字**：`tsconfig.desktop-keyboard-tests.json` 的 `"outDir": "lib/desktop-keyboard-tests/types"`。全仓没有别处引用旧路径。
-
-**冲突高发点**：上游一旦自己修（改路径或放宽 `clean.ts`），这里会冲突或变得多余 —— 上游修了就取上游，并把本项挪到「已被上游吸收」。
-
-**验证**
-
-| 命令 | 预期证据 | 平台限制 |
-|---|---|---|
-| `pnpm run clean` | 输出 `clean: removed <n> paths`，退出码 0 | 无 |
-| `pnpm run typecheck` | 通过（该项目经 `tsconfig.client.json` 纳入） | 无 |
-
----
-
 ### 低风险改动
 
 3 项，**都是新增的文件，官方永远不会碰，不会产生冲突**。合并后不用逐项检查，`git diff <tag> HEAD --stat` 里看到它们还在就行。
@@ -492,6 +473,12 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 
 将来若某项定制被官方实现，把它从上面挪到这里并注明吸收的版本 —— 记下来是为了**下次不再白费力气去保护它**。
 
+#### H8 clean 可用的 outDir（dsh-v0.2.0-rc.2 起不再维护）
+
+**原定制**：`tsconfig.desktop-keyboard-tests.json` 的 `outDir` 由 `lib/desktop-keyboard-test-types` 改为 `lib/desktop-keyboard-tests/types`，因为 `scripts/clean.ts` 要求每个 `outDir` 以 `/types` 结尾，否则 `pnpm run clean`（以及启动器的「构建」按钮）第一步就失败。
+
+**为什么不再维护**：上游提交 `a08472e982`（`fix(build): fold desktop keyboard tests into client typecheck`）删掉了这个 tsconfig，把这些测试并入 client typecheck。合并时表现为 modify/delete 冲突，取上游删除即可。**代价**：无。dsh-v0.2.0-rc.2 实测 `pnpm run clean` 输出 `removed 329 paths`、退出码 0。
+
 #### H5 subprocess spill 文件容错降级（dsh-v0.1.7-rc.1 起不再维护）
 
 **原定制**：子进程输出的 spill 文件在创建、回填、追加写失败时降级为仅保留内存尾部、不抛异常；打开失败时用 `mkdirSync`（recursive、0700）**重建目录并重试一次**。动机是长期运行的宿主（`dsh web`）曾因外部临时目录清理删掉私有 spill 目录、下次溢出 `openSync` 抛 ENOENT 而崩溃 —— 这段代码跑在流的 `'data'` 回调里，未捕获异常直接带走整个宿主进程。
@@ -522,6 +509,14 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 
 ## 三、合并历史
 
+### dsh-v0.2.0-rc.2（2026-09-30）
+
+上游 448 个提交 vs 本分支 22 个提交，merge-base 为 `dsh-v0.1.7-rc.2`。回退点 `backup/dsh-launcher-pre-0.2.0-rc.2`。**没有源码冲突**。H1/H2/H3/H6/H7 的关键名字、四处注释护栏与 `cordis.patch.yml` 的 `inject: [webRuntime, webStartup]` 都自动合并存活；H4/H5 零残留；上游新增的 `127.0.0.1` 都是 mock 服务器（product-telemetry）或 desktop 专用，没有新的就绪行字面断言。
+
+**冲突只有 2 个文件**：`.agents/notes/archived/manifest.json`（两侧各追加一个归档三件套的哈希，两侧都保留）；`tsconfig.desktop-keyboard-tests.json`（modify/delete，上游删了这个文件，取删除，**H8 因此退役**）。生成器全部重跑后与合并结果一致（0 written 或内容无变化）。
+
+**最终验证状态**（本机实测）：`pnpm install`、`clean`（329 paths）、typecheck、lint、duplication（0 clones）、build 全过。定向单测 68 文件 1287 项通过 / 1 跳过（web-app、connection、modules、tools、agent-loop、locale），`1 MiB` 与 `own batch` 两个命名用例通过。`dsh web --help` 五个 flag 齐全，`dsh plugin` 仍要求 `--profile`。`doc-sync` 43 项 41 过：`translation pairing` 与 `markdown wrap` 报的都是合并前已有的本地未提交改动（`docs/openviking-usage-guide.md`、proposed note、`dsh-launcher/README`），与合并无关。`hygiene` 18 项 17 过：`vendor rescope` 报的 3 个文件（`cordis-host-runner/tests/inspect-registry.spec.ts` 与两个 `cordis-inspect-*` snapshot fixture）与上游 tag 逐字节相同，是上游自带问题。**未跑**：全量 `pnpm run test`。**未能验证**：`test:snapshot`（Windows）、`test:e2e`（无 key），以及 H2/H6/H7 的人工实跑项。
+
 ### dsh-v0.1.7-rc.2（2026-09-26）
 
 上游 346 个提交 vs 本分支 21 个提交，merge-base 为 `dsh-v0.1.7-rc.1`。回退点 `backup/dsh-launcher-pre-0.1.7-rc.2`。**没有源码冲突**，H1/H2/H3/H6/H7 的关键名字与四处注释护栏全部自动合并存活；H4/H5 零残留；上游新增的 `127.0.0.1` 全是 mock 服务器或绑定地址，没有新的就绪行字面断言。
@@ -534,7 +529,7 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 2. **H7 的 README 漏了中文侧。**上次 H7 提交只改了 `packages/client/locale/README.md` 的「Preference resolution」一段，`.zh.md` 没跟，新格式的逐小节哈希一眼抓到了。本次补译。
 3. **H7 的测试没过 lint、`api-catalog.ts` 没重跑。**`locale.client.spec.ts` 用 `ReturnType<typeof vi.spyOn>` 标注 spy，泛型未实参化时退化为 `any`，报 17 处 `no-unsafe-*`；改为 `MockInstance<typeof console.error>`，并把 `expect.stringContaining` 那处断言改成显式 `instanceof Error` 检查。`gen-cordis-inspect-catalog` 也因 H7 给 `setLocale` 加的 JSDoc 陈旧了一段。**教训：新增定制后 lint 与生成器也要跑，不只是定向单测。**
 4. **合并中途不能 `git stash`。**索引里有未解决条目时 stash 报 `could not write index`。要在合并中给含本地未提交改动的文件重录哈希，做法是备份工作区文件 → `git checkout HEAD -- <文件>` → `--write` → `git add` 记录 → 拷回备份。
-5. **`pnpm run clean` 失败是上游 bug**，已作为 [H8](#h8-clean-可用的-outdir) 修掉。
+5. **`pnpm run clean` 失败是上游 bug**，已作为 [H8](#h8-clean-可用的-outdirdsh-v020-rc2-起不再维护) 修掉。
 6. **esbuild 与 git hook 的「拒绝访问」是 dsh 沙箱留在本仓库上的 Low 完整性标签**，一度被当成无解的本机环境问题记下。线索是两处报错都是「同一用户、同一文件却没权限」；把 `esbuild.exe` 拷到仓库外就能跑，一步定位到文件标签。撤销方法记在流程节的已知表里。**教训：Windows 上的 `Access is denied` 先用 `icacls` 看一眼 `Mandatory Label`。**
 
 **最终验证状态**（本机实测）：typecheck / lint / duplication(0 clones) / hygiene(18/18) 全过。全量单测 36674 项通过 / 73 失败（22 文件），已知表之外的 6 个文件串行复核 23 文件 910 项全绿，剩余均归入已知表。定向单测 67 文件 1278 项全绿（web-app、connection、modules、tools、agent-loop、locale），含 `1 MiB`、`own batch`、`NO_AUTH_BROWSER_AUTH` 命名用例。`dsh web --help` 五个 flag 齐全、`dsh plugin` 仍要求 `--profile`、`--dump-config` 在位。`doc-sync` 42 项 39 过：`markdown wrap`/`translation pairing` 是本地未跟踪文件与 proposed note 的未提交改动，`documentation build` 当时因 esbuild 标签问题失败。撤销标签后 `pnpm run clean && pnpm run build` 完整通过、`apps/web/dist` 已生成（`documentation build` 未重跑）。**未能验证**：`test:snapshot`（Windows）、`test:e2e`（无 key），以及 H2/H6/H7 的人工实跑项。
