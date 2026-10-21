@@ -171,9 +171,9 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 | 关键名字 | 当前路径 | 说明 |
 |---|---|---|
-| `LOOPBACK_HOST` | `packages/bundle/web-app/src/index.ts` | 唯一的源头常量，值为 `'localhost'` |
+| `LOOPBACK_HOST` | `packages/bundle/web-app/src/index.ts` | 显示用主机名常量，值为 `'localhost'`（dsh-v0.2.1-rc.2 起与 `IPV4_LOOPBACK_HOST = '127.0.0.1'` 成对出现） |
 | 常量上方的护栏注释 | 同上 | 见下方「注释护栏」 |
-| `localWebUrl()` | 同上 | 用 `LOOPBACK_HOST` 拼 URL，本身无需改 |
+| `displayOrigin()` | 同上 | **dsh-v0.2.1-rc.2 重新移植**：上游删掉了 `localWebUrl()`，改由 `ctx.webServer.getOrigin()` 给出绑定 IP 的 origin。`displayOrigin()` 只把 `http:` 且主机恰为 `127.0.0.1` 的 origin 改写成 `localhost`；`appRootUrl()` 在未配 `publicUrl` 时经它取值。TLS（证书绑定主机名）与其他回环字面量（`[::1]`、`127.8.0.10`）一律原样，因为 `localhost` 不一定连得到它们 |
 
 **注释护栏**：`LOOPBACK_HOST` 上方必须保留说明「为什么不能用 IP 字面量」的注释，末句是：
 
@@ -213,7 +213,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 | 位置 | 为什么不改 |
 |---|---|
-| `packages/bundle/web-app/src/startup.ts` 里 `--host 0.0.0.0` 错误提示中的 `127.0.0.1` | 这是**绑定地址**建议，必须用 IP 字面量 |
+| `packages/bundle/web-app/src/startup.ts` 里通配地址（`--host 0.0.0.0`）的拒绝提示 | 绑定地址相关，上游自带，不是显示 URL |
 | `packages/bundle/web-app/cordis.patch.yml` 的 `host: ... ?? '127.0.0.1'` | 绑定默认值 |
 | `scripts/publish-npm-baseline.ts` 的 `--host 127.0.0.1` 参数 | 绑定参数 |
 | `apps/cli/tests/built-bin.e2e.ts` 里 `--host 0.0.0.0` 相关断言 | 绑定建议（**注意**：同文件的就绪行断言要改） |
@@ -247,7 +247,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 
 > **残余风险，用之前要清楚。** 开了 `--no-auth` 之后，唯一还在拦人的就是「绑定在回环地址」加「Host/Origin 信任围栏」。谁能把请求送到这个回环端口、且 Host 头在围栏白名单里，就直接拿到完整的 RPC 权限 —— 而 dsh 的 RPC 能执行命令、读写文件。所以：本机独占用没问题；一旦叠加端口转发（Tailscale、`ssh -R`、反向代理）再配 `--trusted-host`，等于把无认证的代码执行入口暴露给能到达那条隧道的任何人。默认不开这个开关，就是因为这个。
 >
-> 结构上这条链是完整的：`HostConnectionService` 的 `browserAuth` 字段类型是接口 `BrowserAuthenticator`，所以上游任何时候给 `BrowserAuth` 加方法并在服务里调用，`NO_AUTH_BROWSER_AUTH` 少实现就会编译不过 —— 认证面不会被悄悄绕过。核实过全仓库只有 `rpc-host.ts` 消费 `browserAuth`。
+> 结构上这条链是完整的：`HostConnectionService` 的 `browserAuth` 字段类型是接口 `BrowserAuthenticator`，所以上游任何时候给 `BrowserAuth` 加方法并在服务里调用，`NO_AUTH_BROWSER_AUTH` 少实现就会编译不过 —— 认证面不会被悄悄绕过。核实过全仓库只有 `rpc-host.ts` 消费 `browserAuth`。dsh-v0.2.1-rc.2 上游给认证层加了 `authenticateApi()`、`authorizeConnect()` 与 `secure` 参数（API operator 的 `/connect` 令牌交换），接口与 `NO_AUTH_BROWSER_AUTH` 已跟着补齐：无令牌可换，所以 `authorizeConnect` 回 401、`authenticateApi` 回 `undefined`。
 
 **代码关键名字**
 
@@ -261,7 +261,7 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `HostConnectionService` 构造参数类型 `BrowserAuthenticator` | `packages/client/connection/src/rpc-host.ts` | 从具体类放宽为接口 |
 | 构造函数的 `@param browserAuth` | 同上 | 见下方「注释护栏」 |
 | `--no-auth` flag + `noAuth: !options.auth` + 启动警告 | `packages/bundle/web-app/src/startup.ts` | CLI 入口。警告走 `console.log`（stdout），跟就绪行同一条流；现有的就绪行解析都用正则匹配，多一行不影响，但若将来给 stdout 做严格逐行解析，记得它在那儿 |
-| `inject: [webRuntime, webStartup]` + `noAuth: !!js ctx.webStartup.noAuth` | `packages/bundle/web-app/cordis.patch.yml` | **组合接线，typecheck 抓不到这里的错误** |
+| `inject: [webStartup]` + `noAuth: !!js ctx.webStartup.noAuth`（dsh-v0.2.1-rc.2 起上游删掉 `webRuntime`，`trustedHosts` 也改读 `webStartup`） | `packages/bundle/web-app/cordis.patch.yml` | **组合接线，typecheck 抓不到这里的错误** |
 
 **注释护栏**：构造函数的 `@param browserAuth` 必须同时描述免认证那一路，末句是：
 
@@ -370,7 +370,7 @@ the test suite rejects it.
 
 #### H7 语言偏好写入失败不再静默
 
-**定制内容**：设置页选语言后，若 Host 拒绝了持久化写入，`LocaleRuntime` 把选择**回滚到上一次的值**并用 `console.error` 报告原因。进程内 scope（`mode === 'memory'`，非回环页面）例外：它按设计拒绝一切写入，选择保留。
+**定制内容**：设置页选语言后，若 Host 拒绝了持久化写入，`LocaleRuntime` 把选择**回滚到上一次的值**并用 `console.error` 报告原因。**dsh-v0.2.1-rc.2 起不再有「进程内 scope 例外」**：上游让已认证的非回环浏览器也把偏好写进 Host，`ConfigFormSnapshot` 随之没有了 `mode: 'memory'`，写入被拒一律回滚。
 
 **为什么**：上游 `setLocale` 是 `void this.host?.set(...)` —— 写入结果被丢弃；而 `adopt()` 收到 Host 快照后执行 `this.preference = section.preference`，**包含 `undefined` 也照赋**，`resolveActive()` 随即回落到浏览器语言或 `en`。两条叠加的用户可见行为是：选中「中文」界面立刻变中文（乐观发布），切到别的设置分区触发 Host 重读，语言**无声无息变回英文**。没有任何提示说明写入失败过。
 
@@ -386,21 +386,14 @@ the test suite rejects it.
 | `revertRefusedWrite()` | 同上 | 回滚 + 报告；三条判断缺一不可，见下 |
 | `setLocale()` 里 `host.set(...).then(两臂)` | 同上 | 上游原文是 `void this.host?.set(...)`，**这一行就是定制点** |
 
-**三条判断，每条都在防一个具体的错**（合并时被简化掉任何一条都会引入新缺陷）
+**两条判断，每条都在防一个具体的错**（合并时被简化掉任何一条都会引入新缺陷）
 
 | 判断 | 防什么 |
 |---|---|
 | `generation !== this.writeGeneration` → 不回滚 | 用户连点两次语言时，先发出的那次写入若后返回失败，会把后一次的选择踩掉 |
-| `host.getSnapshot().mode === 'memory'` → 不回滚、不报错 | 非回环页面的 form **按设计**拒绝全部写入（`ui-settings/src/client/index.ts` 的 `persistence = ctx.remote.$host.isLoopback ? 'host' : 'memory'`），那种页面「只在本会话生效」是既有行为。少这条就会回归掉局域网访问场景 |
 | `this.snapshot.active === target` → 只恢复字段、不发布 | 选中的就是当前生效语言时（provisional 解析，Host 未存）原本没发布过，回滚也不该发布，否则空转全部订阅者 |
 
-**注释护栏**：`revertRefusedWrite` 的 JSDoc 必须保留解释 memory 例外的那段，末句是：
-
-```
-   * page is expected to stay session-local.
-```
-
-去掉它，下一个人会认为「拒绝就回滚」是无条件的，顺手删掉 mode 判断。
+**注释护栏**：`revertRefusedWrite` 的 JSDoc 说明回滚加上报的用意（偏好行没有自己的失败提示面）。memory 例外退役后，护栏只剩 `generation` 与 `active === target` 两条判断，各由一个命名用例守着。
 
 **冲突高发点**：`setLocale` 是个短方法，上游改写它时自动合并很可能干净通过并把 `void this.host?.set(...)` 带回来。**合并后直接搜 `revertRefusedWrite` 确认它还在、且 `setLocale` 里真的调用了它。**编译器不报、lint 不管；locale 包的测试会红（下表 5 个用例），这是本项唯一的自动信号，**前提是别用 `npx vitest` 跑**。
 
@@ -410,7 +403,7 @@ the test suite rejects it.
 
 | 命令 | 预期证据 | 平台限制 |
 |---|---|---|
-| `pnpm run test packages/client/locale` | 全绿（实测 8 文件 / 66 项）。命名用例：`restores the previous selection so the menu stops showing an unstored preference`、`restores after a write that threw instead of answering`、`restores a selection that never published, leaving the revision untouched`、`keeps the selection on a process-local scope, whose refusal is by construction`、`leaves a newer pick alone when an older write is refused afterwards` | 无 |
+| `pnpm run test packages/client/locale` | 全绿（实测 8 文件 / 66 项）。命名用例：`restores the previous selection so the menu stops showing an unstored preference`、`restores after a write that threw instead of answering`、`restores a selection that never published, leaving the revision untouched`、`leaves a newer pick alone when an older write is refused afterwards` | 无 |
 | `npx vitest run --coverage --coverage.include 'packages/client/locale/src/**' packages/client/locale` | 该包 Statements / Branches / Functions / Lines 全 100%（逐文件门禁要求；此处允许用 npx，覆盖率跑不受 `npm_execpath` 影响） | 无 |
 | 人工：设置页选一次语言，随后读 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` | 出现 `- id: locale` / `config:` / `preference: zh`。**只看界面变没变中文不算证据** —— 界面在写入之前就已经切了 | 需要跑起来的 dsh |
 | 人工：故意造一个孤儿锁（`New-Item $DSH_HOME/profiles/<profile>/package.json.lock`）后再选语言 | 选择立刻弹回原值，DevTools Console 出现 `locale: the Host refused the language preference write` | 同上；**验完记得删掉那个锁文件** |
@@ -477,7 +470,7 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 
 **原定制**：`tsconfig.desktop-keyboard-tests.json` 的 `outDir` 由 `lib/desktop-keyboard-test-types` 改为 `lib/desktop-keyboard-tests/types`，因为 `scripts/clean.ts` 要求每个 `outDir` 以 `/types` 结尾，否则 `pnpm run clean`（以及启动器的「构建」按钮）第一步就失败。
 
-**为什么不再维护**：上游提交 `a08472e982`（`fix(build): fold desktop keyboard tests into client typecheck`）删掉了这个 tsconfig，把这些测试并入 client typecheck。合并时表现为 modify/delete 冲突，取上游删除即可。**代价**：无。dsh-v0.2.0-rc.2 实测 `pnpm run clean` 输出 `removed 329 paths`、退出码 0。
+**为什么不再维护**：上游提交「fix(build): fold desktop keyboard tests into client typecheck」删掉了这个 tsconfig，把这些测试并入 client typecheck。合并时表现为 modify/delete 冲突，取上游删除即可。**代价**：无。dsh-v0.2.0-rc.2 实测 `pnpm run clean` 输出 `removed 329 paths`、退出码 0。
 
 #### H5 subprocess spill 文件容错降级（dsh-v0.1.7-rc.1 起不再维护）
 
@@ -508,6 +501,25 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 ---
 
 ## 三、合并历史
+
+### dsh-v0.2.1-rc.2（2026-10-21）
+
+上游 1925 个提交 vs 本分支 24 个提交，merge-base 为 `dsh-v0.2.0-rc.2`。回退点 `backup/dsh-launcher-pre-0.2.1-rc.2`。
+
+**冲突 22 个文件，其中三条定制被上游改了地基，不是简单合并：**
+
+1. **H1 要重新移植。** 上游删掉了 `LOOPBACK_HOST` 和 `localWebUrl()`，URL 改由 `ctx.webServer.getOrigin()` 给出绑定 IP；Chrome 剥端口的问题仍在（`api-request-trust.ts` 的 Origin 比较没变）。新增 `displayOrigin()` 做显示层改写，只改 `http:` 的 `127.0.0.1`。`web-app.spec.ts`、`public-url.expected.e2e.ts` 的就绪断言随之改回 `localhost`，并补了一个 TLS 回环保持 IP 字面量的用例。
+2. **H2 的接口要补齐。** 上游认证层新增 `authenticateApi`、`authorizeConnect` 与 `secure` 参数，`BrowserAuthenticator` 与 `NO_AUTH_BROWSER_AUTH` 跟着扩；`webRuntime` 被上游删除，`cordis.patch.yml` 只剩 `inject: [webStartup]` 加 `noAuth` 一行。`startup.spec.ts` 里上游新增的两个整体相等断言要补 `noAuth: false`。
+3. **H7 的 memory 例外退役。** 上游让认证后的非回环页面也写 Host，`ConfigFormSnapshot` 没有了 `mode`，`revertRefusedWrite` 里那条判断编译不过，一并删掉判断、用例和 README 句子。
+4. H3、H6 的关键名字与护栏注释自动合并存活；H4/H5/H8 零残留。
+
+其余冲突：生成物 9（`config-catalog`、`persistence-catalog` 三件套、`persistence-schema.json`，取上游重跑；`noAuth` 条目中英两侧都在）、翻译对记录 3、`apps/cli/reference/README`（上游重写了 Web 运行器那段，取上游后补回 `localhost` 与 `--no-auth` 两句）、`archived/manifest.json`（两侧各追加，合并后按键排序）。
+
+**踩到的坑：**
+
+- **Windows 的 `Low Mandatory Level` 标签又回来了**（`vite build` 报 esbuild `Access is denied`），照流程节已知表的办法撤销。
+- **cwd 大小写会让 typecheck 报 `TS1149`**：用小写 `e:\ai\...` 当工作目录时，`terminal-controller` 的声明文件被当成两份。用真实大小写 `E:\AI\deepseek-harness` 即可。
+- 本地未提交的 proposed note 链到了上游已归档的 note，`verify-md-links` 与翻译对都红；改指 `archived/`，中文侧也写 `.md`。
 
 ### dsh-v0.2.0-rc.2（2026-09-30）
 

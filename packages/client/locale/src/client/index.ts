@@ -275,9 +275,9 @@ export class LocaleRuntime {
     const generation = ++this.writeGeneration
     void host.set(LOCALE_PREFERENCE_FIELD, match.id).then(
       (accepted) => {
-        if (!accepted) this.revertRefusedWrite(host, generation, previous)
+        if (!accepted) this.revertRefusedWrite(generation, previous)
       },
-      (reason: unknown) => { this.revertRefusedWrite(host, generation, previous, reason) },
+      (reason: unknown) => { this.revertRefusedWrite(generation, previous, reason) },
     )
   }
 
@@ -321,24 +321,16 @@ export class LocaleRuntime {
    * Restore the selection a refused durable write left unstored, and report the
    * refusal — the only signal this feature has, because a preference row owns
    * no failure surface.
-   *
-   * A scope that is process-local by construction (`mode: 'memory'`, the
-   * persistence a non-loopback browser resolves) refuses every write by design
-   * and has no durable selection to lose, so its refusal keeps the pick: that
-   * page is expected to stay session-local.
-   * @param host - the scope that answered this write.
    * @param generation - the write's generation; a superseded one restores nothing.
    * @param previous - the selection standing before that write's optimistic publication.
    * @param reason - the rejection value when the write threw rather than answering.
    */
   private revertRefusedWrite(
-    host: ConfigForm<LocaleSettings>,
     generation: number,
     previous: LocaleId | undefined,
     reason?: unknown,
   ): void {
     if (generation !== this.writeGeneration) return
-    if (host.getSnapshot().mode === 'memory') return
     this.preference = previous
     console.error(
       'locale: the Host refused the language preference write; restored the previous selection',

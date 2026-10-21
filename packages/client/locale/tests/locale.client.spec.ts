@@ -368,23 +368,6 @@ describe('LocaleRuntime', () => {
       }
     })
 
-    it('keeps the selection on a process-local scope, whose refusal is by construction', async () => {
-      // A non-loopback browser resolves memory persistence: every write is
-      // refused and the page is expected to stay session-local.
-      const host = stubConfigForm<LocaleSettings>()
-      host.publish({ mode: 'memory' })
-      const { svc } = make(host)
-      const reported = refusalReporter()
-      try {
-        host.set.mockResolvedValueOnce(false)
-        svc.setLocale('en')
-        await vi.waitFor(() => { expect(host.set).toHaveBeenCalledOnce() })
-        expect(svc.getLocale().active).toBe('en')
-        expect(reported).not.toHaveBeenCalled()
-      } finally {
-        reported.mockRestore()
-      }
-    })
 
     it('leaves a newer pick alone when an older write is refused afterwards', async () => {
       const host = stubConfigForm<LocaleSettings>()
