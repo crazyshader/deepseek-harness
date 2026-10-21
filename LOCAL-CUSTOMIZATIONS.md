@@ -132,6 +132,37 @@ pnpm run test:snapshot    # 模型/用户可见输出回放。Windows 跑不了�
 | `build:web` / `documentation build` 报 esbuild `remove ...\esbuild-<hash>: Access is denied`；git hook 报 `sh.exe ... NtCreateDirectoryObject ... 0xC0000022` | **dsh 自己的 Windows ACL 沙箱把本仓库当过工作区**，在根目录留下常驻的 `Low Mandatory Level` 可继承标签和 `S-1-4-941875597-941718598`（= `workspaceWriteSid('E:\ai\deepseek-harness')`）写 ACE。标签继承到 `node_modules` 里的 exe，Windows 按文件标签把 `esbuild.exe`、`lefthook.exe` 降成低完整性进程，于是删不掉 `%TEMP%` 里的文件、`sh.exe` 建不了命名对象。判别：`icacls E:\ai\deepseek-harness` 出现 `Mandatory Label\Low Mandatory Level`。**修复**（`icacls` 撤不掉，要走沙箱模块，停掉 `dsh web` 后执行，约 16 秒）：`npx tsx -e "import { AclWriteGrant } from './packages/sandbox/sandbox-windows-acl/src/grant.ts'; import { revokeWrite } from './packages/sandbox/sandbox-windows-acl/src/acl.ts'; const g = AclWriteGrant.create('<icacls 里那个 S-1-4 SID>') as any; revokeWrite(g.api, 'E:\\ai\\deepseek-harness', g.sidPtr)"`。根目录上的 `Everyone:(CI)(DENY)(S,DC)` 是同一次授权留下的删除拒绝项，不影响构建，保留未动。**别再把 dsh 源码仓库当 dsh 的工作区开沙箱**，否则标签会被重新打上（2026-09-26 实测定位并修复） |
 | 大批测试文件随机失败、集合每轮不同 | 并发资源争用。**串行单跑一遍确认**，别当回归。dsh-v0.1.6-alpha.2 两轮全量分别报 28 / 33 个失败；dsh-v0.1.7-rc.1 报 83 个，串行复核后只剩上表几项 |
 
+#### 速查：esbuild / lefthook 报 `Access is denied`，直接修复
+
+**症状**：`pnpm run build`（`build:web`、`documentation build`）报 `[vite:esbuild-transpile] remove ...\Temp\esbuild-<hash>: Access is denied`；或 git hook 报 `sh.exe ... NtCreateDirectoryObject ... 0xC0000022`。
+
+**根因**：dsh 自带的 Windows ACL 沙箱曾把本仓库当过工作区，在仓库根目录留下两条常驻项：可继承的 `Mandatory Label\Low Mandatory Level:(OI)(CI)(NW)`，以及 `S-1-4-941875597-941718598:(OI)(CI)(W,D,DC)`（即 `workspaceWriteSid('E:\ai\deepseek-harness')`）。标签继承到 `node_modules` 里的 `esbuild.exe`、`lefthook.exe`，Windows 就按文件标签把它们降成低完整性进程，于是删不掉 `%TEMP%` 里的文件、`sh.exe` 建不了命名对象。出现条件：在本仓库里用 dsh 的沙箱模式跑过 dsh 或图形启动器。2026-09-26 首次定位，2026-10-21 合并 `dsh-v0.2.1-rc.2` 时复发。
+
+**判别**（任一命中即是）：
+
+```powershell
+icacls E:\AI\deepseek-harness | Select-String "Mandatory|S-1-4"
+```
+
+输出出现 `Low Mandatory Level` 或 `S-1-4-…`。同一用户、同一文件却没权限，先看这个，别当成环境问题绕路。
+
+**修复**（停掉 `dsh web` 后执行，约 16 秒；`icacls` 撤不掉，要走沙箱模块）：
+
+```powershell
+cd E:\AI\deepseek-harness
+npx tsx -e "import { AclWriteGrant } from './packages/sandbox/sandbox-windows-acl/src/grant.ts'; import { revokeWrite } from './packages/sandbox/sandbox-windows-acl/src/acl.ts'; const g = AclWriteGrant.create('S-1-4-941875597-941718598') as any; revokeWrite(g.api, 'E:\\AI\\deepseek-harness', g.sidPtr)"
+icacls E:\AI\deepseek-harness | Select-String "Mandatory|S-1-4"   # 应无输出
+pnpm run build
+```
+
+SID 以 `icacls` 里实际出现的那个 `S-1-4-…` 为准，换了仓库路径就会变。根目录上的 `Everyone:(CI)(DENY)(S,DC)` 是同一次授权留下的删除拒绝项，不影响构建，保留不动。
+
+**验证**：`icacls` 不再出现上面两项，`pnpm run build` 的 `Web build` 关卡通过（2026-10-21 实测）。
+
+**别做**：
+- 别用外部项目里的 `Fix-LowIntegrity.ps1 -Fix`（`E:\Unity\Project\AnimalMafia-Main\Tools\FixLowIntegrity`）整树重置：它对同一根因有效，但 `/T` 会遍历 `node_modules` 与 `.git`，慢且可能误伤，也不删 `S-1-4` 条目。仅当 `revokeWrite` 后仍报错，才用它不带 `-Fix` 检测，确认子目录是否残留 Low 标签。
+- 别把 dsh 源码仓库当 dsh 的工作区开沙箱，否则标签会被重新打上。要在本仓库里让 dsh 干活，关掉沙箱或换一个工作区目录。
+
 另有两项**关卡**红是本机文件与上游自身造成的，不是合并问题：
 
 | 关卡 | 原因 |

@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 import plugin_manager as pm
-from config import DEFAULT_PORT, LauncherConfig
+from config import DEFAULT_PORT, LauncherConfig, canonical_path
 from proc_utils import NO_WINDOW, find_pids_on_port, free_port, kill_process_tree
 
 
@@ -348,6 +348,7 @@ class LauncherWindow(QMainWindow):
         chosen = QFileDialog.getExistingDirectory(self, "选择项目根目录", start_dir)
         if not chosen:
             return
+        chosen = canonical_path(chosen)
         self.config.project_root = chosen
         self.dir_edit.setText(chosen)
         self.config.save()
@@ -377,7 +378,10 @@ class LauncherWindow(QMainWindow):
         if not root:
             self._warn("请先选择项目根目录。")
             return None
-        path = Path(root)
+        # resolve() 在 Windows 上返回磁盘上的真实大小写。配置里存的可能是 e:\ai\...，
+        # 而磁盘实际是 E:\AI\...；两种写法混用会让 tsdown 内嵌 worker 构建报
+        # "Missing field `code`"，也会让 tsc 报 TS1149（路径仅大小写不同）。
+        path = Path(root).resolve()
         if not (path / "package.json").is_file():
             self._warn(f"所选目录不是项目根（未找到 package.json）:\n{root}")
             return None
