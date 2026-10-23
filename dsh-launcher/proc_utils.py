@@ -9,11 +9,68 @@
 
 from __future__ import annotations
 
+import locale
+import os
+import shutil
 import subprocess
 
 # 无窗口执行子命令，避免打包成 --windowed 后弹出黑框。
 # 公开给同项目其他模块复用，避免这个魔数在多处重写。
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+
+
+def decode_output(data: bytes) -> str:
+    """解码子进程输出：先按 UTF-8，失败再按系统 ANSI/OEM 代码页（中文系统为 GBK）。"""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for enc in (locale.getpreferredencoding(False), "gbk"):
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def ensure_pnpm_path() -> tuple[str | None, str, bool]:
+    """确保子进程能找到 pnpm。
+
+    返回 (需要加到 PATH 最前的目录或 None, 提示信息, 是否可用)。
+    顺序：PATH 中已有 -> npm/PNPM_HOME 常见目录 -> corepack 垫片（写入启动器配置目录，无副作用于全局）。
+    不用 `corepack pnpm` 改写命令，因为脚本内部还会嵌套调用 pnpm。
+    """
+    if shutil.which("pnpm"):
+        return None, "", True
+    # 常见全局安装目录可能不在 GUI 进程的 PATH 中
+    candidates = [os.environ.get("PNPM_HOME"), os.path.join(os.environ.get("APPDATA", ""), "npm")]
+    for d in candidates:
+        if d and os.path.isfile(os.path.join(d, "pnpm.cmd")):
+            return d, f"[提示] 已将 {d} 加入 PATH 以找到 pnpm。\n", True
+    corepack = shutil.which("corepack")  # Windows 下解析为 corepack.cmd 的完整路径
+    if not corepack:
+        return None, (
+            "[错误] 未找到 pnpm，也未找到 corepack。请安装 Node.js（含 corepack）后执行 "
+            "`corepack enable`，或执行 `npm i -g pnpm`。\n"
+        ), False
+    shim = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "dsh-launcher", "pnpm-shim")
+    if os.path.isfile(os.path.join(shim, "pnpm.cmd")):
+        return shim, "", True
+    try:
+        os.makedirs(shim, exist_ok=True)
+        result = subprocess.run(
+            [corepack, "enable", "--install-directory", shim],
+            creationflags=NO_WINDOW,
+            capture_output=True,
+            timeout=30,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"[错误] 未找到 pnpm，通过 corepack 启用失败: {exc}\n", False
+    if result.returncode != 0 or not os.path.isfile(os.path.join(shim, "pnpm.cmd")):
+        out = decode_output((result.stdout or b"") + (result.stderr or b""))
+        return None, f"[错误] 未找到 pnpm，`corepack enable` 失败:\n{out}\n", False
+    return shim, f"[提示] 未找到 pnpm，已通过 corepack 启用（垫片目录 {shim}）。\n", True
 
 
 def kill_process_tree(pid: int) -> None:

@@ -18,13 +18,14 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -48,7 +49,14 @@ from PySide6.QtWidgets import (
 
 import plugin_manager as pm
 from config import DEFAULT_PORT, LauncherConfig, canonical_path
-from proc_utils import NO_WINDOW, find_pids_on_port, free_port, kill_process_tree
+from proc_utils import (
+    NO_WINDOW,
+    decode_output,
+    ensure_pnpm_path,
+    find_pids_on_port,
+    free_port,
+    kill_process_tree,
+)
 
 
 def dist_index(root: Path) -> Path:
@@ -617,6 +625,9 @@ class LauncherWindow(QMainWindow):
         step = item.steps[batch["step"]]
         self._append_log(f"$ {step.label}\n")
         proc = QProcess(self)
+        _, env = self._prepare_pnpm_env()
+        if env is not None:
+            proc.setProcessEnvironment(env)
         proc.setWorkingDirectory(str(step.cwd))
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(lambda p=proc: self._on_batch_ready_read(p))
@@ -628,7 +639,7 @@ class LauncherWindow(QMainWindow):
     def _on_batch_ready_read(self, proc: QProcess) -> None:
         if proc is not self.process or self._batch is None:
             return
-        data = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+        data = decode_output(bytes(proc.readAllStandardOutput()))
         self._batch["output"] += data
         self._append_log(data)
 
@@ -784,13 +795,32 @@ class LauncherWindow(QMainWindow):
         self._chain = {"name": name, "steps": steps, "index": 0, "on_success": on_success}
         self._start_step(steps[0])
 
+    def _prepare_pnpm_env(self) -> tuple[bool, QProcessEnvironment | None]:
+        """检测 pnpm 并按需补全子进程 PATH；不可用时输出中文提示并返回 False。"""
+        extra, message, ok = ensure_pnpm_path()
+        if message:
+            self._append_log(message)
+        if not ok:
+            return False, None
+        if extra is None:
+            return True, None
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("PATH", extra + os.pathsep + env.value("PATH"))
+        return True, env
+
     def _start_step(self, step: _Step) -> None:
         chain = self._chain
         self._append_log(f"\n===== [{chain['name']}] {step.label} =====\n")
         self.status_label.setText(f"运行中: {chain['name']}")
         if step.service:
             self.is_serving = True
+        ok, env = self._prepare_pnpm_env()
+        if not ok:
+            self._finish_chain(1)
+            return
         proc = QProcess(self)
+        if env is not None:
+            proc.setProcessEnvironment(env)
         proc.setWorkingDirectory(str(step.cwd))
         proc.setProcessChannelMode(QProcess.MergedChannels)  # 合并 stdout/stderr
         proc.readyReadStandardOutput.connect(self._on_ready_read)
@@ -863,7 +893,7 @@ class LauncherWindow(QMainWindow):
         if self.process is None:
             return
         data = self.process.readAllStandardOutput()
-        text = bytes(data).decode("utf-8", errors="replace")
+        text = decode_output(bytes(data))
         self._append_log(text)
 
     def _on_process_error(self, error: QProcess.ProcessError) -> None:
