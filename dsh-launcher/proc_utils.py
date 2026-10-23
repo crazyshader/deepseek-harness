@@ -41,11 +41,14 @@ def find_pids_on_port(port: int) -> list[int]:
         ["netstat", "-ano", "-p", "TCP"],
         creationflags=NO_WINDOW,
         capture_output=True,
-        text=True,
     )
     pids: set[int] = set()
     needle = f":{port}"
-    for line in result.stdout.splitlines():
+    # netstat 按系统 OEM 代码页（中文系统为 GBK）输出表头，用 UTF-8 解码会抛
+    # UnicodeDecodeError 并导致 stdout 为 None；这里取字节并容错解码，
+    # 数据行只含 ASCII，不受影响。
+    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+    for line in stdout.splitlines():
         parts = line.split()
         # 形如: TCP  0.0.0.0:3080  0.0.0.0:0  LISTENING  12345
         if len(parts) < 5:
