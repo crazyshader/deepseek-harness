@@ -51,7 +51,7 @@ import plugin_manager as pm
 from config import DEFAULT_PORT, LauncherConfig, canonical_path
 from proc_utils import (
     NO_WINDOW,
-    decode_output,
+    StreamDecoder,
     ensure_pnpm_path,
     find_pids_on_port,
     free_port,
@@ -172,6 +172,7 @@ class LauncherWindow(QMainWindow):
         # {"kind": "check"|"update", "items": [_BatchItem,...], "index": int,
         #  "results": {name: True|False}, "current_step": int}；None 表示无批量任务在跑。
         self._batch: dict | None = None
+        self._decoder = StreamDecoder()  # 子进程输出的增量解码器，每次启动进程时重建
         # 服务状态缓存：(has_project, installed, built, stale, running_port)
         self._service_status: tuple[bool, bool, bool, bool, bool] | None = None
 
@@ -624,8 +625,17 @@ class LauncherWindow(QMainWindow):
         item = batch["items"][batch["index"]]
         step = item.steps[batch["step"]]
         self._append_log(f"$ {step.label}\n")
+        ok, env = self._prepare_pnpm_env()
+        if not ok:
+            # pnpm 不可用时后续条目同样会失败，直接中止整个批次
+            for pending in batch["items"][batch["index"]:]:
+                batch["results"][pending.name] = False
+                batch["reasons"][pending.name] = "未找到 pnpm"
+            self._append_log("[错误] pnpm 不可用，已中止本批次。\n")
+            self._finish_batch()
+            return
         proc = QProcess(self)
-        _, env = self._prepare_pnpm_env()
+        self._decoder = StreamDecoder()  # 每个子进程独立的增量解码状态
         if env is not None:
             proc.setProcessEnvironment(env)
         proc.setWorkingDirectory(str(step.cwd))
@@ -639,7 +649,7 @@ class LauncherWindow(QMainWindow):
     def _on_batch_ready_read(self, proc: QProcess) -> None:
         if proc is not self.process or self._batch is None:
             return
-        data = decode_output(bytes(proc.readAllStandardOutput()))
+        data = self._decoder.feed(bytes(proc.readAllStandardOutput()))
         self._batch["output"] += data
         self._append_log(data)
 
@@ -819,6 +829,7 @@ class LauncherWindow(QMainWindow):
             self._finish_chain(1)
             return
         proc = QProcess(self)
+        self._decoder = StreamDecoder()  # 每个子进程独立的增量解码状态
         if env is not None:
             proc.setProcessEnvironment(env)
         proc.setWorkingDirectory(str(step.cwd))
@@ -893,7 +904,7 @@ class LauncherWindow(QMainWindow):
         if self.process is None:
             return
         data = self.process.readAllStandardOutput()
-        text = decode_output(bytes(data))
+        text = self._decoder.feed(bytes(data))
         self._append_log(text)
 
     def _on_process_error(self, error: QProcess.ProcessError) -> None:

@@ -80,7 +80,7 @@ The artifact is `dist/dsh-launcher.exe`; double-click to use, with no Python ins
 
 - Python 3.9+
 - PySide6 (see `requirements.txt`)
-- The target machine must have `pnpm` installed and on PATH (the launcher only calls it)
+- The target machine needs Node.js and `pnpm`. The launcher looks for pnpm in this order: PATH → `PNPM_HOME` and `%APPDATA%\npm` → a shim generated with `corepack enable --install-directory` in `%APPDATA%\dsh-launcher\pnpm-shim` (global environment untouched; the first run downloads pnpm and needs the network); if none works, it logs an error and aborts the task
 
 ## Platform
 

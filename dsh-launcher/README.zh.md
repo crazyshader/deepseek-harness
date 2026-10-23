@@ -80,7 +80,7 @@ python build.py
 
 - Python 3.9+
 - PySide6（见 `requirements.txt`）
-- 目标机器需已安装 `pnpm` 且在 PATH 中（启动器只是调用它）
+- 目标机器需已安装 Node.js 与 `pnpm`。启动器按以下顺序查找 pnpm：PATH → `PNPM_HOME` 与 `%APPDATA%\npm` → 用 `corepack enable --install-directory` 在 `%APPDATA%\dsh-launcher\pnpm-shim` 生成垫片（不改全局环境，首次需联网下载 pnpm）；都找不到时在日志里给出中文报错并中止任务
 
 ## 平台
 

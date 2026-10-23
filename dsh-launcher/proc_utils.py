@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import codecs
 import locale
 import os
 import shutil
@@ -25,12 +26,48 @@ def decode_output(data: bytes) -> str:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         pass
-    for enc in (locale.getpreferredencoding(False), "gbk"):
+    for enc in (_ansi_encoding(), "gbk"):
         try:
             return data.decode(enc)
         except (UnicodeDecodeError, LookupError):
             continue
     return data.decode("utf-8", errors="replace")
+
+
+def _ansi_encoding() -> str:
+    """系统 ANSI 代码页（中文系统为 GBK），取不到时回退 gbk。"""
+    # UTF-8 模式（Python 3.15 起默认）下 getpreferredencoding 恒为 utf-8，
+    # 需用 getencoding（3.11+）取真实 ANSI 代码页
+    getter = getattr(locale, "getencoding", None)
+    enc = getter() if getter else locale.getpreferredencoding(False)
+    try:
+        codecs.lookup(enc)
+        return enc
+    except LookupError:
+        return "gbk"
+
+
+class StreamDecoder:
+    """子进程输出的增量解码器：先按 UTF-8，遇到非法序列后整条流改按 ANSI 代码页。
+
+    增量解码会缓存块尾不完整的多字节字符，避免字符被读取块边界切断而乱字。
+    每个子进程使用一个独立实例。
+    """
+
+    def __init__(self) -> None:
+        self._utf8 = codecs.getincrementaldecoder("utf-8")()
+        self._fallback = None
+
+    def feed(self, data: bytes) -> str:
+        if self._fallback is None:
+            pending = self._utf8.getstate()[0]
+            try:
+                return self._utf8.decode(data)
+            except UnicodeDecodeError:
+                # 连同上一块缓存的残余字节一起改按 ANSI 代码页解码
+                self._fallback = codecs.getincrementaldecoder(_ansi_encoding())(errors="replace")
+                data = pending + data
+        return self._fallback.decode(data)
 
 
 def ensure_pnpm_path() -> tuple[str | None, str, bool]:
