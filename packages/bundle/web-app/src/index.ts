@@ -20,7 +20,7 @@ import z from '@deepseek-ai/schemastery'
 import { auditStartupEntries } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
-import { bindUrlHost, isLoopbackHost } from '@deepseek-ai/dsh-host-webserver'
+import { bindUrlHost, isLoopbackHost, isWildcardHost } from '@deepseek-ai/dsh-host-webserver'
 import { launchedThroughSsh, launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -212,14 +212,15 @@ export function apply(ctx: Context, config: Config): void {
   // the string transform and reaches here, meaning unset.
   const publicUrl = config.publicUrl ?? undefined
   const boundHost = ctx.webServer.host
-  if (publicUrl === undefined && bindUrlHost(boundHost) === undefined) {
+  if (publicUrl === undefined && bindUrlHost(boundHost) === undefined && !isWildcardHost(boundHost)) {
     throw new Error(
       `web-app: bind address ${JSON.stringify(boundHost)} carries an interface zone id, which no URL can express;`
       + ' pass --public-url with the root browsers actually reach it through',
     )
   }
   if (ctx.webServer.protocol === 'http:' && !isLoopbackHost(boundHost)) {
-    console.warn(`dsh web: listening on ${boundHost} over plain HTTP; restrict this port to a trusted proxy or network`)
+    const scope = isWildcardHost(boundHost) ? 'every interface' : boundHost
+    console.warn(`dsh web: listening on ${scope} over plain HTTP; restrict this port to a trusted proxy or network`)
   }
   // The bind URL belongs to this host. Under SSH, the operator reaches it
   // through a local forwarding address that this process cannot derive.

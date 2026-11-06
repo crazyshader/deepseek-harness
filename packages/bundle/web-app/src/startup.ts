@@ -10,7 +10,7 @@
 import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
-import { isWildcardHost, type TlsConfig } from '@deepseek-ai/dsh-host-webserver'
+import type { TlsConfig } from '@deepseek-ai/dsh-host-webserver'
 import { parsePublicUrl } from './public-url.ts'
 
 /** Stable Cordis plugin name. */
@@ -64,7 +64,7 @@ function webCommand(): Command {
     .name('dsh --profile web')
     .description('Serve the DeepSeek Harness browser UI.')
     .helpOption('-h, --help', 'show this help')
-    .option('--host <host>', 'bind address: one concrete IPv4 or IPv6 literal of a local interface; wildcard addresses are rejected')
+    .option('--host <host>', 'bind address: a concrete IPv4/IPv6 literal, or 0.0.0.0/:: to listen on every interface')
     .option('--no-auth', 'disable browser token authentication (for trusted local environments)')
     .option('--no-open', 'do not open the Web UI in the default browser')
     .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
@@ -78,6 +78,7 @@ Examples:
   dsh --profile web --no-open                serve without opening a browser
   dsh --profile web --port 8080              serve on another port
   dsh --profile web --host 10.0.0.7          bind one local interface address
+  dsh --profile web --host 0.0.0.0          listen on every interface (trusted networks only)
   dsh --profile web --public-url https://app.example/ui/ --trusted-host app.example
                                              advertise a prefix-stripping HTTPS proxy entry and admit its authority
   dsh --profile web --tls-cert ./server-chain.pem --tls-key ./server-key.pem
@@ -88,17 +89,15 @@ Examples:
 /**
  * Parse and provide the Web invocation as an ordinary Cordis service. The
  * command's action publishes the flags this invocation named. Invalid flags,
- * including an unpaired TLS certificate or key, are usage errors; rejection
- * and `--help` provide no service.
+ * including an unpaired TLS certificate or key, are usage errors; `--host` may
+ * use an unspecified address to listen on every interface. Rejection and
+ * `--help` provide no service.
  * @param ctx - plugin context carrying the command line.
  */
 export function apply(ctx: Context): void {
   const program = webCommand()
   program.action(() => {
     const options = program.opts<WebOptions>()
-    if (options.host !== undefined && isWildcardHost(options.host)) {
-      program.error(`error: --host ${options.host} is an unspecified (wildcard) address, which is not supported: binding every interface would expose remote code execution to the network; bind one concrete IPv4 or IPv6 address instead`)
-    }
     if (options.port !== undefined && !/^\d+$/.test(options.port)) {
       program.error(`error: --port must be a number, got ${JSON.stringify(options.port)}`)
     }

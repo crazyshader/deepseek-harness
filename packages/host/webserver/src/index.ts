@@ -76,12 +76,12 @@ export interface TlsConfig {
 export interface Config {
   /**
    * Listen address: a concrete IPv4 or IPv6 literal of one local interface,
-   * for example the container's own Pod address from `hostname -i`. A loopback
-   * literal (any address in 127/8, `::1`, or a mapped form of either) keeps the
-   * server on this machine; any other literal serves the network that address
-   * belongs to, over plain HTTP unless `tls` is set. The unspecified address —
-   * IPv4 any, IPv6 any, and the IPv4-mapped forms of IPv4 any — is rejected at
-   * load: it would expose the port on every interface at once.
+   * or an unspecified address (`0.0.0.0` / `::`) to listen on every interface.
+   * A loopback literal (any address in 127/8, `::1`, or a mapped form of either)
+   * keeps the server on this machine; any other literal serves the network that
+   * address belongs to, over plain HTTP unless `tls` is set. Binding an
+   * unspecified address exposes the port on every interface, so use it only on a
+   * trusted network and keep browser authentication enabled.
    */
   host: string
   /** Listen port; zero requests an OS-assigned port. */
@@ -167,6 +167,7 @@ function isWildcardAddress(parsed: ipaddr.IPv4 | ipaddr.IPv6): boolean {
  * Whether a bind address requests every interface at once.
  * @param host - bind address from configuration.
  * @returns true for IPv4 any, IPv6 any, and an IPv4-mapped form of IPv4 any.
+ * This predicate is informational; wildcard addresses are valid bind addresses.
  */
 export function isWildcardHost(host: string): boolean {
   const parsed = parseIpLiteral(host)
@@ -278,11 +279,7 @@ async function readTlsFile(field: 'certFile' | 'keyFile', path: string): Promise
 export class WebServer extends Service {
   static Config: z<Config> = z.object({
     host: z.transform(z.string(), (value) => {
-      const parsed = parseIpLiteral(value)
-      if (parsed === undefined) throw notLiteralError(value)
-      if (isWildcardAddress(parsed)) {
-        throw new Error(`webserver: host ${JSON.stringify(value)} is an unspecified (wildcard) address, which is not supported: binding every interface would expose remote code execution to the network; bind one concrete IPv4 or IPv6 address of a local interface instead`)
-      }
+      if (parseIpLiteral(value) === undefined) throw notLiteralError(value)
       return value
     }).required(),
     port: z.natural().max(65535).required(),
@@ -328,7 +325,7 @@ export class WebServer extends Service {
     return this.listenedPort
   }
 
-  /** The configured bind address (one concrete local interface). */
+  /** The configured bind address, including an unspecified address for every interface. */
   get host(): Config['host'] {
     return this.config.host
   }
@@ -345,16 +342,18 @@ export class WebServer extends Service {
   /**
    * The root URL local clients use to reach the bound listener: the protocol,
    * the {@link bindUrlHost} form of the bind address, and the listening port.
-   * @returns the origin, for example `http://127.0.0.1:3080`.
+   * @returns the origin, for example `http://127.0.0.1:3080`. Wildcard
+   * addresses use `localhost` because they have no single interface URL; remote
+   * clients should use the machine's concrete LAN address.
    * @throws before `listen` binds a port, or when the bind address has no URL form.
    */
   getOrigin(): string {
     const host = bindUrlHost(this.config.host)
-    if (host === undefined) {
+    if (host === undefined && !isWildcardHost(this.config.host)) {
       throw new Error(`webserver: bind address ${JSON.stringify(this.config.host)} carries an interface zone id, which no URL can express`)
     }
     if (this.listenedPort === undefined) throw new Error('webserver: origin read before the listener bound a port')
-    return `${this.protocol}//${host}:${String(this.listenedPort)}`
+    return `${this.protocol}//${host ?? 'localhost'}:${String(this.listenedPort)}`
   }
 
   /**
