@@ -186,7 +186,9 @@ SID 以 `icacls` 里实际出现的那个 `S-1-4-…` 为准，换了仓库路�
 
 ### 高风险改动
 
-5 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4、H5、H8 已退役（见[已被上游吸收](#已被上游吸收)），保留 H1/H2/H3/H6/H7 的原编号不重排 —— 重排会让历史记录里的引用全部失效。
+当前在册 7 项，全都改动了官方文件。**每次合并都要逐项核对。**编号 H4、H5、H6、H8 已退役（见[已被上游吸收](#已被上游吸收)），保留原编号不重排 —— 重排会让历史记录里的引用全部失效。
+
+H9、H10、H11 是 dsh-v0.2.2-rc.1 的 review 补登记的：代码早在上一轮合并之前就进了本分支，当时没按[第四节](#四维护约定)登记。补登记后核对范围从「5 项」变成「7 项」。
 
 ---
 
@@ -244,11 +246,11 @@ SID 以 `icacls` 里实际出现的那个 `S-1-4-…` 为准，换了仓库路�
 
 | 位置 | 为什么不改 |
 |---|---|
-| `packages/bundle/web-app/src/startup.ts` 里通配地址（`--host 0.0.0.0`）的拒绝提示 | 绑定地址相关，上游自带，不是显示 URL |
+| `packages/bundle/web-app/src/startup.ts` 里通配地址（`--host 0.0.0.0`）的拒绝提示 | **本分支已删这条**（见 [H9](#h9-web-服务器接受通配绑定地址dsh-v022-rc1-review-补登记)）——绑定地址相关，不是显示 URL |
 | `packages/bundle/web-app/cordis.patch.yml` 的 `host: ... ?? '127.0.0.1'` | 绑定默认值 |
 | `scripts/publish-npm-baseline.ts` 的 `--host 127.0.0.1` 参数 | 绑定参数 |
 | `apps/cli/tests/built-bin.e2e.ts` 里 `--host 0.0.0.0` 相关断言 | 绑定建议（**注意**：同文件的就绪行断言要改） |
-| `packages/host/webserver/src/index.ts` 的 `z.const('127.0.0.1')` | 绑定 schema |
+| `packages/host/webserver/src/index.ts` 的 `host` schema | 绑定 schema。上游 dsh-v0.2.2-rc.1 起是 `z.transform(z.string())` + `parseIpLiteral`，不再是 `z.const('127.0.0.1')`；通配地址的加载时拒绝被本分支去掉（见 [H9](#h9-web-服务器接受通配绑定地址dsh-v022-rc1-review-补登记)），但显示 URL 仍走 `displayOrigin()` |
 | `packages/client/connection/src/loopback-hostname.ts` | **上游自带**，已同时接受两种写法，无需改 |
 | `apps/desktop-host/src/index.ts` 的 `authenticatedUrl('http://127.0.0.1:<port>')` | **最像 H1 但绝对不能改的一处。**dsh-v0.1.6-alpha.2 新增的 Electron 宿主包，它算出的是渲染进程用的 `streamBaseUrl`。Electron 里页面来自 `dsh-app://app`，`apps/desktop/src/main.ts` 会把出站请求的 `Origin` 改写成 `target.origin`（同文件搜 `sec-fetch-site`），也就是说它自己保证了 Origin 与 base URL 一致 —— Chrome 剥端口那个前提根本不成立。改成 `localhost` 只会让两边不一致 |
 | `llm-*` / `mcp-*` / `subagent-*` / `system-prompt` / `ui-chat` 测试里的 `127.0.0.1` | 无关的 mock 服务器地址 |
@@ -274,7 +276,7 @@ SID 以 `icacls` 里实际出现的那个 `S-1-4-…` 为准，换了仓库路�
 
 **定制内容**：新增 `--no-auth` 启动开关，跳过浏览器 token / cookie 交换，供可信本地环境使用。Host/Origin 信任围栏**不受影响**。
 
-**为什么**：本地或内网可信环境下（例如经 Tailscale 访问），每次启动都要带 token 的 URL 很不方便。注意这个开关**只关掉 token 交换**，不是关掉全部访问控制 —— 信任围栏和「拒绝 `--host 0.0.0.0`」都还在。
+**为什么**：本地或内网可信环境下（例如经 Tailscale 访问），每次启动都要带 token 的 URL 很不方便。注意这个开关**只关掉 token 交换**，不是关掉全部访问控制 —— 信任围栏还在。原来还有一道「加载时拒绝 `--host 0.0.0.0`」，本分支已经去掉（见 [H9](#h9-web-服务器接受通配绑定地址dsh-v022-rc1-review-补登记)），所以绑定回环时靠回环，绑定通配地址时只剩围栏。
 
 > **残余风险，用之前要清楚。** 开了 `--no-auth` 之后，唯一还在拦人的就是「绑定在回环地址」加「Host/Origin 信任围栏」。谁能把请求送到这个回环端口、且 Host 头在围栏白名单里，就直接拿到完整的 RPC 权限 —— 而 dsh 的 RPC 能执行命令、读写文件。所以：本机独占用没问题；一旦叠加端口转发（Tailscale、`ssh -R`、反向代理）再配 `--trusted-host`，等于把无认证的代码执行入口暴露给能到达那条隧道的任何人。默认不开这个开关，就是因为这个。
 >
@@ -361,44 +363,6 @@ SID 以 `icacls` 里实际出现的那个 `S-1-4-…` 为准，换了仓库路�
 
 ---
 
-#### H6 工具调度器 symbol 用全局注册表
-
-**定制内容**：`TOOL_RUNTIME_SCHEDULER` 由 `Symbol(...)` 改为 `Symbol.for(...)`，键字符串不变。
-
-**为什么**：源码模式启动（`pnpm dsh` = `node --import tsx/esm apps/cli/src/bin.ts`，**图形启动器走的就是这条**）会让 `@deepseek-ai/dsh-tools` 被加载两份 —— tsx 按 `tsconfig.base.json` 的 `paths` 把包名解析到 `src/`，而 cordis Loader 从 profile 目录按 Node `exports` 解析到 `lib/`。`Symbol()` 每次求值产生唯一值，两份各持一个不相等的键，于是 `ctx.tools[TOOL_RUNTIME_SCHEDULER]` 读到 `undefined`，**第一次工具调用就以 `TypeError: Cannot read properties of undefined (reading 'prepare')` 结束整轮**（`code: UNKNOWN`，无 `tool/result` 事件）。`Symbol.for` 走全局注册表按字符串查找，跨模块实例相等。
-
-用构建产物启动（`node apps/cli/lib/bin.js`）只加载一份，本来就不触发；这项定制是为了让源码模式也能用。
-
-**残留事实**：两份模块的 `ToolRuntime` **类**仍不是同一个，`Symbol.for` 不改变这点。核实过全仓没有跨包 `instanceof ToolRuntime`，tools 包也无模块级可变状态，故当前无害 —— 但将来若新增跨包 `instanceof` 或跨包共享的模块级状态，平面混用会再次咬人。
-
-**代码关键名字**
-
-| 关键名字 | 当前路径 | 说明 |
-|---|---|---|
-| `TOOL_RUNTIME_SCHEDULER` | `packages/core/tools/src/index.ts` | 唯一改动点，值为 `Symbol.for('@deepseek-ai/dsh-tools.scheduler')` |
-| 常量上方的 JSDoc 护栏 | 同上 | 说明「为什么不能用 `Symbol()`」，见下方「注释护栏」 |
-
-**注释护栏**：该常量的 JSDoc 必须保留说明双平面加载后果的段落，末句是：
-
-```
-Reverting to `Symbol()` restores that failure and neither the compiler nor
-the test suite rejects it.
-```
-
-这段话是这项定制唯一的护栏。**改回 `Symbol()` 编译器不报、测试不红、lint 不管** —— 全仓没有任何关卡覆盖它，只有真机跑一次工具调用才会暴露。
-
-**冲突高发点**：`packages/core/tools/src/index.ts` 是上游高频改动文件，而本定制只有一行。上游若重写该文件附近，自动合并很可能干净通过却把 `Symbol.for` 换回 `Symbol()`。合并后**必须直接搜 `Symbol.for('@deepseek-ai/dsh-tools.scheduler')` 确认它还在**。
-
-**验证**
-
-| 命令 | 预期证据 | 平台限制 |
-|---|---|---|
-| `pnpm run test packages/core/tools packages/core/agent-loop` | 全绿（实测 36 文件 / 842 通过 / 1 跳过） | 无 |
-| `pnpm run build:lib:host` | 无类型错误（确认 TS 接受 `Symbol.for` 赋给 `unique symbol`） | 无 |
-| 用启动器（或 `pnpm dsh web`）启动后发一条触发工具调用的消息 | 工具正常执行，不出现 `reading 'prepare'` | 需要可用模型 |
-
----
-
 #### H7 语言偏好写入失败不再静默
 
 **定制内容**：设置页选语言后，若 Host 拒绝了持久化写入，`LocaleRuntime` 把选择**回滚到上一次的值**并用 `console.error` 报告原因。**dsh-v0.2.1-rc.2 起不再有「进程内 scope 例外」**：上游让已认证的非回环浏览器也把偏好写进 Host，`ConfigFormSnapshot` 随之没有了 `mode: 'memory'`，写入被拒一律回滚。
@@ -438,6 +402,61 @@ the test suite rejects it.
 | `npx vitest run --coverage --coverage.include 'packages/client/locale/src/**' packages/client/locale` | 该包 Statements / Branches / Functions / Lines 全 100%（逐文件门禁要求；此处允许用 npx，覆盖率跑不受 `npm_execpath` 影响） | 无 |
 | 人工：设置页选一次语言，随后读 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` | 出现 `- id: locale` / `config:` / `preference: zh`。**只看界面变没变中文不算证据** —— 界面在写入之前就已经切了 | 需要跑起来的 dsh |
 | 人工：故意造一个孤儿锁（`New-Item $DSH_HOME/profiles/<profile>/package.json.lock`）后再选语言 | 选择立刻弹回原值，DevTools Console 出现 `locale: the Host refused the language preference write` | 同上；**验完记得删掉那个锁文件** |
+
+---
+
+#### H9 Web 服务器接受通配绑定地址（dsh-v0.2.2-rc.1 review 补登记）
+
+**定制内容**：`webserver` 不再在加载时拒绝 `0.0.0.0` / `::`；`isWildcardHost()` 只作信息判断；`getOrigin()` 对通配地址返回 `localhost`。`startup.ts` 里 commander 对 `--host` 通配地址的拒绝也删掉了。
+
+**为什么**：提交没写动机（`feat(web): accept wildcard bind addresses for the Web server`）；从本分支的 Tailscale 远程访问用法推断，是要在 Tailscale 地址上监听。若动机不是这个，本节要改。Host/Origin 信任围栏不受影响：非回环来源仍需 `--trusted-host`。
+
+**代码关键名字**
+
+| 关键名字 | 当前路径 | 说明 |
+|---|---|---|
+| `isWildcardHost()` | `packages/host/webserver/src/index.ts` | JSDoc 里写明「informational」；这是本定制唯一的说明 |
+| `Config` 的 `host` schema | 同上 | 只剩 `parseIpLiteral` 校验，不再抛错 |
+| `getOrigin()` 的 `host ?? 'localhost'` | 同上 | 通配地址没有单一接口 URL |
+
+**必须跟着改的文档**（本轮 review 就是这两处漏改，红的是本定制、不是合并）：`docs/subsystems/web-server.{md,zh.md}` 的 Config `type-equiv` 块必须与源码逐字一致，`verify-type-equiv` 会报漂移；`docs/cli-help.{md,zh.md}` 是生成物，改 CLI 帮助文本后要 `pnpm run gen-cli-help`。
+
+**冲突高发点**：上游若恢复加载时拒绝，自动合并会干净通过并把这段改回去。合并后搜 `informational` 与 `host ?? 'localhost'` 确认还在。
+
+**验证**：`pnpm run test packages/host/webserver packages/bundle/web-app`；`pnpm run doc-sync` 的 `type equivalence`。
+
+---
+
+#### H10 MCP 大工具列表的延迟 schema 与指令字节上限（dsh-v0.2.2-rc.1 review 补登记）
+
+**定制内容**：`mcp-client` 的 `Config` 加 `deferTools`（注册但基线 schema 省略）与 `instructionByteLimit`（超 `maxInstructionBytes` 时保留前导整句）。配合上游已有的 `ToolSchema.deferLoading`：本分支把基线里带 `deferLoading` 的工具从 `available` 与 `toolDeclarations` 排除。
+
+**代码关键名字**
+
+| 关键名字 | 当前路径 | 说明 |
+|---|---|---|
+| `deferTools`、`instructionByteLimit` | `packages/mcp/mcp-client/src/index.ts` | 两个 union 分支都有 |
+| `deferredTools` | `packages/mcp/mcp-client/src/tools.ts` | `ToolBridgeOptions` 字段 |
+| `toolDeclarations` 的 `deferLoading !== true` 过滤 | `packages/llm/llm/src/content.ts` | 上游字段、本分支的语义 |
+| `available` 的同一过滤 | `packages/core/session/src/tool-history.ts` | 延迟基线工具要靠自己的添加块才可用 |
+
+**冲突高发点**：四个文件都是上游高频改动区。`duplication` 会因两个 union 分支各加两行而报跨文件克隆（本轮实测 1 处）；用 `/* jscpd:ignore-start */` 之外的办法只有把共享字段抽成一个对象 —— 但 `gen-config-catalog` 的 schema 走查不接受 spread 属性，所以这条只能靠 `--write` 关卡放行或改写法，遇到时先判断上游的走查是否已支持。
+
+**验证**：`pnpm run test packages/mcp/mcp-client packages/llm/llm packages/core/session packages/core/agent-loop`、`pnpm run duplication`。
+
+---
+
+#### H11 本地运行策略：默认权限、plan mode 软阻塞、persona（dsh-v0.2.2-rc.1 review 补登记）
+
+**定制内容**：`packages/bundle/base/cordis.patch.yml` 与四个 bundle 的默认值 —— sandbox-policy 默认 `danger-full-access`、approval policy 默认 `never`、plan-mode 段落改成「operator 明确要求执行时按指示执行」、`personaPrefix` 置空、`tool-pwsh-persistent` 描述里删掉「本工具不能上网」。改动处带 `# [dsh-purge]` 标记。
+
+**为什么**：本分支跑的是本机单用户会话；这些是部署策略，不是产品默认。`--no-auth` 与 H9 叠加时风险面最大（见 H2 的残余风险）。
+
+**冲突高发点**：这些段落上游会改写；自动合并会干净通过并把上游措辞带回来，**没有任何关卡报这种丢失**。合并后按 `# [dsh-purge]` 标记逐处核对。
+
+**已知连带**：上游两个测试断言 persona 文本（`packages/bundle/sdk-app/tests/sdk-app.spec.ts`、`packages/bundle/sdk-minimal/tests/sdk-minimal.spec.ts`），本定制会让它们红 —— 本轮把断言改成空串。**测试与行为必须一起改**（AGENTS 的约定）。
+
+**验证**：`pnpm run test packages/bundle/sdk-app packages/bundle/sdk-minimal`；`pnpm run doc-sync` 的 `Cordis config`。
 
 ---
 
@@ -497,6 +516,16 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 
 将来若某项定制被官方实现，把它从上面挪到这里并注明吸收的版本 —— 记下来是为了**下次不再白费力气去保护它**。
 
+#### H6 工具调度器 symbol 用全局注册表（dsh-v0.2.2-rc.1 起不再维护）
+
+**原定制**：`TOOL_RUNTIME_SCHEDULER` 用 `Symbol.for()` 而不是 `Symbol()`，让源码模式的双平面加载下两份模块实例得到同一个键。
+
+**为什么不再维护**：上游在这一版把 `packages/core/tools/src/index.ts` 拆成 `contracts.ts` / `events.ts` / `executor.ts` / `schema.ts` / `batch.ts` / `pipeline.ts`，并**去掉了按 symbol 键访问的调度器**：分派改走 `selectExecutor()` 与服务的显式方法，管道以对象实例跨入口共享（`tests/exports.built.e2e.ts` 验的就是这份跨入口一致性）。没有 symbol 键，就没有「两次求值不相等」这回事 —— 原故障路径不存在，定制也没有可移植的目标位置，整文件取上游即是零改动。
+
+**代价**：无。双平面加载本身没变；上游现在仍在用的跨边界键（`dsh-typert` 的 `owned-value`、`dsh-subagent` 的两个 internal 键、inspector 的 `cordis.shadow`）本来就走全局注册表。将来若再出现跨包 `instanceof` 或跨包共享的模块级状态，平面混用还会咬人。
+
+**怎么发现的**：不是靠名字消失 —— 是解冲突时看到「我们这一侧只剩一行定制、上游那一侧删了整块」。合并后的树里 `TOOL_RUNTIME_SCHEDULER` 只剩历史引用（2026-11-06 实测 `git grep`）。
+
 #### H8 clean 可用的 outDir（dsh-v0.2.0-rc.2 起不再维护）
 
 **原定制**：`tsconfig.desktop-keyboard-tests.json` 的 `outDir` 由 `lib/desktop-keyboard-test-types` 改为 `lib/desktop-keyboard-tests/types`，因为 `scripts/clean.ts` 要求每个 `outDir` 以 `/types` 结尾，否则 `pnpm run clean`（以及启动器的「构建」按钮）第一步就失败。
@@ -532,6 +561,40 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 ---
 
 ## 三、合并历史
+
+### dsh-v0.2.2-rc.1（2026-11-06）
+
+上游 2642 个提交 vs 本分支 32 个提交，merge-base 为 `dsh-v0.2.1-rc.2`。回退点 `backup/dsh-launcher-pre-0.2.2-rc.1`。
+
+**冲突 12 个文件**，分四类：
+
+| 类型 | 数量 | 处理 |
+|---|---|---|
+| 生成物 | 7 | `config-catalog.{md,zh.md}`、`persistence-catalog` 三件套、`persistence-schema.json`，取上游后重跑生成器 |
+| 文件级重构 | 1 | `packages/core/tools/src/index.ts`，取上游（见 [H6 退役](#h6-工具调度器-symbol-用全局注册表dsh-v022-rc1-起不再维护)） |
+| H3 内容冲突 | 2 | `docs/subsystems/client-modules.{md,zh.md}`：取上游措辞后把 1 MiB 那几句嵌回去 |
+| 翻译对记录 | 3 | `client-modules`、`client/modules/README`、`apps/cli/reference/README`，正文先解、再 `--write` 重录 |
+
+**主事件是 H6 退役。** 上游把 tools 包拆成 `contracts.ts` / `events.ts` / `executor.ts` / `schema.ts` / `batch.ts` / `pipeline.ts`，按 symbol 键访问的调度器整个消失：分派改走 executor 选择与服务的显式方法，跨入口靠实例共享（`tests/exports.built.e2e.ts` 验的就是这份一致性）。定制没有可移植的位置，取上游即零残留。这一类只有解冲突时才看得见 —— 本分支那一侧只剩一行加九行 JSDoc，上游那一侧删了整块。
+
+H1、H2、H3、H7 的关键名字与三处注释护栏全部自动合并存活；H4、H5 零残留（`OutputCollector` 全仓 3 处调用都是三参数写法）；上游新增的 `127.0.0.1` 都是 mock 端点或绑定地址，没有新的就绪行字面断言，`displayOrigin()` 仍只改 `http:` 的 `127.0.0.1`，TLS 与 `[::1]` 保持原样。
+
+**本次 review 补登记 H9 / H10 / H11**（代码在 dsh-v0.2.1-rc.2 之后就进了本分支，当时没登记）。H9 的动机是推断出来的，没写在提交里 —— 如果推断错了，那一节要改。
+
+**review 修的都是清单与文档，不是合并本身：**
+
+1. `docs/subsystems/web-server.{md,zh.md}` 的 Config `type-equiv` 块与源码不一致：H9 改了源码 JSDoc，没带文档。对齐后 `type equivalence` 过。
+2. `docs/cli-help.{md,zh.md}` 陈旧：H9 改了 `--host` 的帮助文本。`pnpm run gen-cli-help` 后过。
+3. proposed note 链到上游已归档的 note（`implemented/simplification/2026-07-24-agent-loop-observable-state-machine` → `archived/`），中文侧也写 `.md`。
+4. 三条翻译对记录未重录（proposed note、`dsh-launcher/README`、`mcp-client/README`）。
+5. `mcp-client/src/tools.ts` 的两条 lint 错误是 H10 自己引入的（合并前就红）：`?.includes(...) === true` 改成直接判断。
+6. 两个上游测试断言 persona 文本，被 H11 置空后红（合并前就红）：断言改成 `''`。**行为改了测试要跟着改**，这条是 AGENTS 的约定。
+
+**最终验证状态**（本机实测 2026-11-06）：`pnpm install`（上游新增 11 个 devDependencies，8m30s）、`clean`（360 paths，未报 outDir 问题）、typecheck 5/5、lint 0 错误（剩 1 条警告在 `client-ui-cot-translation/src/index.ts` 的 unused disable 指令，该文件与上游 tag 逐字节相同）、build 10/10、duplication 1 处克隆（H10 给两个 union 分支各加两行，越过 6 行门限；抽成共享对象会被 `gen-config-catalog` 的 schema 走查拒绝 —— 它不接受 spread 属性，只能窄豁免或换写法，留给下次决定）、`doc-sync` 41/43（红的是 `docs/openviking-usage-guide.md` 的硬换行与缺中文配对，与本分支文件，见流程节）、`hygiene` 21/23（两项都是上游自带：`vendor rescope` 报的 5 个文件和 `verify-cordis-config` 报的 `apps/cli/tests/profiles/acp/cordis.yml` 都与 tag 逐字节相同，`scripts/rescope-vendor.ts` 也没动过）。
+
+定向单测 169 文件 / 3538 通过 / 1 跳过（web-app、connection、modules、tools、agent-loop、locale、mcp-client、webserver、llm、session、sdk-app、sdk-minimal），含 `1 MiB`、`own batch`、`NO_AUTH_BROWSER_AUTH`、`--no-auth` 与 H7 的四个命名用例。全量 `pnpm run test` 中途被中断，已见失败全部落在流程节的本机环境表（`client-ui-forge`、`tool-worktree`、`deliverables/workspace-changes`、`desktop` 各项的 5 秒超时与 `native-command` 的 Windows 探针）—— 只有那两处 persona 断言是 H11 造成的，已修。
+
+`dsh web --help` 五个 flag 齐全（`--host` / `--port` / `--no-open` / `--no-auth` / `--trusted-host`，这是 H2 的端到端证据），`dsh plugin` 仍要求 `--profile`，`--dump-config` 在 `apps/cli/src/args.ts` 里还在。**未能验证**：`test:snapshot`（Windows 跑不了）、`test:e2e`（无 key），以及 H2、H7 的人工实跑项。
 
 ### dsh-v0.2.1-rc.2（2026-10-21）
 
@@ -674,10 +737,10 @@ dsh-v0.1.7-rc.1 实测（与 0.1.6-alpha.2 结论一致）：`dsh web --help` �
 
 **不贴大段 diff**：代码片段会过期，而且看起来很权威，比没有更危险。例外是「定制本身就是那一小段文本」的情况，比如 H1 的注释护栏。
 
-**本文件不在任何检查关卡内。** 它是 fork 私有文件，`verify-md-links` 的语料不含它（dsh-v0.1.7-rc.1 实测 2200 个受检文件里没有它），所以内部锚点链接失效不会有人报错。改完自查一次：
+**本文件不在任何检查关卡内。** 它是 fork 私有文件，`verify-md-links` 的语料不含它（dsh-v0.1.7-rc.1 实测 2200 个受检文件里没有它；本轮 dsh-v0.2.2-rc.1 实测 `verify-repository-references` **会**扫它，所以别在正文里写带字母的 commit hash），所以内部锚点链接失效不会有人报错。改完自查一次（缓存工厂在 dsh-v0.2.2-rc.1 已改名 `markdownLinkCache()`，旧写法 `anchorCache()` 跑不起来）：
 
 ```powershell
-npx tsx -e "import { findViolations, anchorCache } from './scripts/verify-md-links.ts'; import { resolve } from 'node:path'; const v = findViolations(resolve('LOCAL-CUSTOMIZATIONS.md'), anchorCache()); console.log(v.length === 0 ? 'all links OK' : JSON.stringify(v, null, 1))"
+npx tsx -e "import { findViolations, markdownLinkCache } from './scripts/verify-md-links.ts'; import { resolve } from 'node:path'; const v = findViolations(resolve('LOCAL-CUSTOMIZATIONS.md'), markdownLinkCache()); console.log(v.length === 0 ? 'all links OK' : JSON.stringify(v, null, 1))"
 ```
 
 **与 Agent Note 的分工**：note 记「为什么这么设计、考虑过哪些替代方案」，本清单记「是什么、在哪、怎么验」。note 可能被归档冻结，**冲突时以本清单为准**。

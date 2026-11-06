@@ -57,12 +57,12 @@ interface WebResourceRoute {
 interface Config {
   /**
    * Listen address: a concrete IPv4 or IPv6 literal of one local interface,
-   * for example the container's own Pod address from `hostname -i`. A loopback
-   * literal (any address in 127/8, `::1`, or a mapped form of either) keeps the
-   * server on this machine; any other literal serves the network that address
-   * belongs to, over plain HTTP unless `tls` is set. The unspecified address —
-   * IPv4 any, IPv6 any, and the IPv4-mapped forms of IPv4 any — is rejected at
-   * load: it would expose the port on every interface at once.
+   * or an unspecified address (`0.0.0.0` / `::`) to listen on every interface.
+   * A loopback literal (any address in 127/8, `::1`, or a mapped form of either)
+   * keeps the server on this machine; any other literal serves the network that
+   * address belongs to, over plain HTTP unless `tls` is set. Binding an
+   * unspecified address exposes the port on every interface, so use it only on a
+   * trusted network and keep browser authentication enabled.
    */
   host: string
   /** Listen port; zero requests an OS-assigned port. */

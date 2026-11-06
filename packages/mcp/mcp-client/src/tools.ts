@@ -142,7 +142,7 @@ export async function syncTools(
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
       taskRequired: tool.execution?.taskSupport === 'required',
-      deferred: opts.deferredTools?.includes(tool.name) === true,
+      deferred: opts.deferredTools.includes(tool.name),
       call: (args, execution) => client.callTool(
         { name: tool.name, arguments: args },
         { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
