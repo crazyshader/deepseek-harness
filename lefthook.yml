@@ -46,4 +46,4 @@ pre-merge-commit:
 pre-push:
   jobs:
     - name: typecheck
-      run: pnpm run typecheck
+      run: node_modules/.bin/tsx scripts/build.ts --scope typecheck
