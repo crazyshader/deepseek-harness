@@ -108,7 +108,7 @@ dsh --profile tui
 
 ## Web Profile
 
-`dsh web` 使用 profile 简写。启动器先解析自身的 flag，其余 flag 属于 web 应用，由组合包中的普通提供方解析。`--host` 与 `--port` 覆盖组合的监听器取值，`--tls-cert`/`--tls-key` 则设置监听器的 `tls` 证书对。host 必须指名一个具体的本机地址，不能是通配地址（`--host 0.0.0.0` 会以用法错误退出）；`hostname -i` 可能列出多个，请只传一个。可重复的 `--trusted-host` 值会收集到 `ctx.webStartup.trustedHosts`；部署表达式可以添加自己的 authority。`--no-open` 只对本次调用关闭默认浏览器交接。客户端插件 HMR（热模块替换）接收器始终挂载，在 `pnpm run dev:web` 重建客户端 bundle 之前保持空闲；该命令先构建一次，再启动这同一个启动器并持续重建客户端 bundle，加 `--no-serve` 则只运行 watcher、配合别处启动的 `dsh web`。
+`dsh web` 使用 profile 简写。启动器先解析自身的 flag，其余 flag 属于 web 应用，由组合包中的普通提供方解析。`--host` 与 `--port` 覆盖组合的监听器取值，`--tls-cert`/`--tls-key` 则设置监听器的 `tls` 证书对。`--host` 接受一个具体的本机地址，或一个监听所有网卡的未指定地址（`0.0.0.0` / `::`）；`hostname -i` 可能列出多个，请只传一个。`--no-auth` 只接受 loopback 绑定：调用里指名 loopback 之外的绑定地址会是用法错误，因为没有令牌交换时，Host/Origin 围栏是 RPC 的唯一关卡。可重复的 `--trusted-host` 值会收集到 `ctx.webStartup.trustedHosts`；部署表达式可以添加自己的 authority。`--no-open` 只对本次调用关闭默认浏览器交接。客户端插件 HMR（热模块替换）接收器始终挂载，在 `pnpm run dev:web` 重建客户端 bundle 之前保持空闲；该命令先构建一次，再启动这同一个启动器并持续重建客户端 bundle，加 `--no-serve` 则只运行 watcher、配合别处启动的 `dsh web`。
 
 `--public-url <url>` 公告唯一的 HTTP(S) 应用根——可带转发前缀——替代监听器的绑定地址 URL（回环绑定时为回环地址）。它不授予信任，因此浏览器可见的 authority 仍需用 `--trusted-host` 点名；[在反向代理之后发布 Web UI](../../../docs/user/guide/public-deployments.zh.md)列出了前置代理必须提供的内容。
 

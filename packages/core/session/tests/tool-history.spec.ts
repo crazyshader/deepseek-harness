@@ -110,6 +110,17 @@ describe('Session.toolHistory', () => {
     expect(projected.messages).toEqual([{ ...added, content: [add('fetch')] }])
   })
 
+  it('keeps recorded additions when a deferred baseline tool has not been activated', () => {
+    const deferred: ToolSchema = { ...fetch, deferLoading: true }
+    const session = opened([search, deferred])
+    const baseline = session.snapshotEvents().find(event => event.type === 'request/header')!
+    const added = update(session, [add('search')], baseline.seq)
+    expect(session.toolHistory()).toEqual({
+      tools: [search, deferred],
+      updates: [{ messageId: added.id, additions: [search] }],
+    })
+  })
+
   it('continues the series when a retained name is restored unchanged', () => {
     const session = opened([search, fetch])
     header(session, [search])

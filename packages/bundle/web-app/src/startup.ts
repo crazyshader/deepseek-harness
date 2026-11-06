@@ -10,7 +10,7 @@
 import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
-import type { TlsConfig } from '@deepseek-ai/dsh-host-webserver'
+import { isLoopbackHost, type TlsConfig } from '@deepseek-ai/dsh-host-webserver'
 import { parsePublicUrl } from './public-url.ts'
 
 /** Stable Cordis plugin name. */
@@ -65,7 +65,7 @@ function webCommand(): Command {
     .description('Serve the DeepSeek Harness browser UI.')
     .helpOption('-h, --help', 'show this help')
     .option('--host <host>', 'bind address: a concrete IPv4/IPv6 literal, or 0.0.0.0/:: to listen on every interface')
-    .option('--no-auth', 'disable browser token authentication (for trusted local environments)')
+    .option('--no-auth', 'disable browser token authentication; refused on a bind outside loopback')
     .option('--no-open', 'do not open the Web UI in the default browser')
     .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
     .option('--public-url <url>', 'advertise this HTTP(S) root in the printed, opened, runtime-context, and DSH_WEB_URL forms; grants no trust')
@@ -89,9 +89,9 @@ Examples:
 /**
  * Parse and provide the Web invocation as an ordinary Cordis service. The
  * command's action publishes the flags this invocation named. Invalid flags,
- * including an unpaired TLS certificate or key, are usage errors; `--host` may
- * use an unspecified address to listen on every interface. Rejection and
- * `--help` provide no service.
+ * including an unpaired TLS certificate or key and `--no-auth` on a bind outside
+ * loopback, are usage errors; `--host` may use an unspecified address to listen
+ * on every interface. Rejection and `--help` provide no service.
  * @param ctx - plugin context carrying the command line.
  */
 export function apply(ctx: Context): void {
@@ -115,6 +115,11 @@ export function apply(ctx: Context): void {
       }
     }
     if (!options.auth) {
+      // Security invariant, not a preference: with no token exchange, the
+      // Host/Origin fence is the only gate on RPC outside the loopback host.
+      if (options.host !== undefined && !isLoopbackHost(options.host)) {
+        program.error('error: --no-auth requires a loopback bind; keep browser authentication enabled on any other bind address')
+      }
       console.log('⚠ --no-auth: browser token authentication is disabled')
     }
     ctx.provide(WEB_STARTUP_SERVICE, {

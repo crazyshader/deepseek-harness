@@ -37,9 +37,7 @@ export class ToolHistoryProjection {
         this.baselineSeq = event.seq
         this.declared = new Map(tools.map(tool => [tool.name, tool]))
         this.history = deepFreeze({ tools, updates: [] })
-        // A deferred baseline tool is declared but withheld: it becomes available
-        // only through its own addition, exactly like a later-joined tool.
-        this.available = new Set(tools.filter(tool => tool.deferLoading !== true).map(tool => tool.name))
+        this.available = new Set(tools.map(tool => tool.name))
       }
       this.active = tools
     } else if (event.type === 'developer/message') {

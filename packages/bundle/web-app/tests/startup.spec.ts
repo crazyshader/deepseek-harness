@@ -201,4 +201,18 @@ describe('web command-line provider', () => {
     expect(values).toEqual({ noAuth: true, openBrowser: true, trustedHosts: [] })
     expect(observed.exits).toEqual([])
   })
+
+  it('rejects --no-auth on a bind outside loopback before activating consumers', async () => {
+    const { values, observed } = await bootProvider(['--no-auth', '--host', '10.1.2.3'])
+    expect(observed.out).toContain('error: --no-auth requires a loopback bind')
+    expect(values).toBeUndefined()
+    expect(observed.readerConfig).toBeUndefined()
+    expect(observed.exits).toEqual([1])
+  })
+
+  it('publishes noAuth for an explicit loopback bind', async () => {
+    const { values, observed } = await bootProvider(['--no-auth', '--host', '127.0.0.1'])
+    expect(values).toEqual({ host: '127.0.0.1', noAuth: true, openBrowser: true, trustedHosts: [] })
+    expect(observed.exits).toEqual([])
+  })
 })

@@ -185,8 +185,8 @@ Serve the DeepSeek Harness browser UI.
 Options:
   --host <host>                  bind address: a concrete IPv4/IPv6 literal, or
                                  0.0.0.0/:: to listen on every interface
-  --no-auth                      disable browser token authentication (for
-                                 trusted local environments)
+  --no-auth                      disable browser token authentication; refused
+                                 on a bind outside loopback
   --no-open                      do not open the Web UI in the default browser
   --port <port>                  listen port; pass 0 to let the OS pick a free
                                  one

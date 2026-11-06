@@ -99,7 +99,7 @@ interface TlsConfig {
 }
 ```
 
-没有组合能一次性绑定所有网络接口：未指定地址在加载时即被拒绝。导出的 `isWildcardHost` 与 `isLoopbackHost` 按解析后的地址值分类，IPv6 的 `%zone` 会保留给 `listen`，而分类只读取地址本身。载体不拥有认证或 Origin 策略，并且除非 `tls` 提供证书与密钥，否则以明文 HTTP 提供服务。`compression` 默认为 `none`；随附的 Web 组合选择 gzip level 1 和 1024 字节阈值。随附的 `dsh web` 命令默认选择 loopback 并接受一个具体的 `--host` 地址，非 loopback 绑定以明文 HTTP 提供服务时会在启动时警告；其 Connection 插件为每个 Host API route 与 stream 提供 Host/Origin 校验和浏览器会话认证，绑定地址加 `--trusted-host` 决定接受哪个浏览器 Host；`--public-url` 只改变公告的 URL。其他组合自行拥有绑定与路由认证策略。dist 位置是认领席位的前端插件的组装事实。
+未指定地址一次性绑定所有网络接口，随附的命令接受它。导出的 `isWildcardHost` 与 `isLoopbackHost` 按解析后的地址值分类，IPv6 的 `%zone` 会保留给 `listen`，而分类只读取地址本身。载体不拥有认证或 Origin 策略，并且除非 `tls` 提供证书与密钥，否则以明文 HTTP 提供服务。`compression` 默认为 `none`；随附的 Web 组合选择 gzip level 1 和 1024 字节阈值。随附的 `dsh web` 命令默认选择 loopback，接受一个具体的 `--host` 字面量或未指定地址，在 loopback 之外的绑定上拒绝 `--no-auth`，并且非 loopback 绑定以明文 HTTP 提供服务时会在启动时警告；其 Connection 插件为每个 Host API route 与 stream 提供 Host/Origin 校验和浏览器会话认证，绑定地址加 `--trusted-host` 决定接受哪个浏览器 Host；`--public-url` 只改变公告的 URL。其他组合自行拥有绑定与路由认证策略。dist 位置是认领席位的前端插件的组装事实。
 
 ## 服务
 

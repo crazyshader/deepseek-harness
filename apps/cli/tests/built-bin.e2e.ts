@@ -375,13 +375,14 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
       expect(web.stdout).toContain('--public-url <url>')
       expect(web.stdout).not.toContain('dsh web: http://')
 
-      const wildcardHost = await runBuiltBin(['web', '--host', '0.0.0.0'], {
+      const noAuthOutsideLoopback = await runBuiltBin(['web', '--host', '10.1.2.3', '--no-auth'], {
         DSH_HOME: home,
         DSH_TELEMETRY_DISABLED: '1',
       })
-      expect(wildcardHost.code).toBe(1)
-      expect(wildcardHost.stdout).toBe('')
-      expect(wildcardHost.stderr).not.toContain('dsh web: http://')
+      expect(noAuthOutsideLoopback.code).toBe(1)
+      expect(noAuthOutsideLoopback.stdout).toBe('')
+      expect(noAuthOutsideLoopback.stderr).toContain('--no-auth requires a loopback bind')
+      expect(noAuthOutsideLoopback.stderr).not.toContain('dsh web: http://')
 
       const headlessHelp = await runBuiltBin(['headless', '--help'], {
         DSH_HOME: home,

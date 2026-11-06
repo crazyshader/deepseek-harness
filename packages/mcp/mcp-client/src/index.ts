@@ -145,24 +145,30 @@ export const Config = z.union([
     args: z.array(String).default([]),
     env: z.dict(String).default({}),
     cwd: z.string().default(''),
+    /* jscpd:ignore-start */
+    // Shared with the streamable-http branch below. `gen-config-catalog`'s schema
+    // walker rejects a spread property, so these fields cannot be extracted.
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
     instructionByteLimit: z.number().step(1).min(0).default(0),
     deferTools: z.array(String).default([]),
     reconnect: Reconnect,
+    /* jscpd:ignore-end */
   }),
   z.object({
     transport: z.const('streamable-http'),
     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
     url: z.string().required(),
     headers: z.dict(String).default({}),
+    /* jscpd:ignore-start */
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
     instructionByteLimit: z.number().step(1).min(0).default(0),
     deferTools: z.array(String).default([]),
     reconnect: Reconnect,
+    /* jscpd:ignore-end */
   }),
 ]) as z<ConfigInput, Config>
 
