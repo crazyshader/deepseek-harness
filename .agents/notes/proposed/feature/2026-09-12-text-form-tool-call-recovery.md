@@ -46,7 +46,7 @@ The first sample closes `parameter` twice; the second opens `description` as a b
 
 ## Proposal
 
-Add `@deepseek-ai/dsh-text-form-tool-call-recovery` under `packages/guard/`, a loop-hygiene plugin that listens on `agent/turn-stopping` and asks the model to resend the call through the tool channel. The [agent-loop state machine](../../implemented/simplification/2026-07-24-agent-loop-observable-state-machine.md) defines that extension point: a listener that objects records steering with `agent.steer()`, and the loop re-reads its inbox before committing the boundary. The plugin needs no change to `agent-loop`.
+Add `@deepseek-ai/dsh-text-form-tool-call-recovery` under `packages/guard/`, a loop-hygiene plugin that listens on `agent/turn-stopping` and asks the model to resend the call through the tool channel. The [agent-loop state machine](../../archived/simplification/2026-07-24-agent-loop-observable-state-machine.md) defines that extension point: a listener that objects records steering with `agent.steer()`, and the loop re-reads its inbox before committing the boundary. The plugin needs no change to `agent-loop`.
 
 ### Detection
 

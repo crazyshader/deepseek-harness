@@ -46,7 +46,7 @@ Read 3090 token URL from log
 
 ## 提案
 
-在 `packages/guard/` 下新增 `@deepseek-ai/dsh-text-form-tool-call-recovery`，一个循环卫生插件：监听 `agent/turn-stopping`，要求模型经工具通道重新发出该调用。[agent loop 状态机](../../implemented/simplification/2026-07-24-agent-loop-observable-state-machine.zh.md)定义了这个扩展点：监听器若有异议，就用 `agent.steer()` 记录 steering（中途引导），循环在提交边界前重读收件箱。该插件不需要改动 `agent-loop`。
+在 `packages/guard/` 下新增 `@deepseek-ai/dsh-text-form-tool-call-recovery`，一个循环卫生插件：监听 `agent/turn-stopping`，要求模型经工具通道重新发出该调用。[agent loop 状态机](../../archived/simplification/2026-07-24-agent-loop-observable-state-machine.md)定义了这个扩展点：监听器若有异议，就用 `agent.steer()` 记录 steering（中途引导），循环在提交边界前重读收件箱。该插件不需要改动 `agent-loop`。
 
 ### 检测
 
