@@ -208,9 +208,9 @@ git diff <tag> HEAD --name-only -- README.* apps/cli/reference apps/cli/tests ap
 
 **定制内容**：新增 `--no-auth` 开关，跳过浏览器 token / cookie 交换，供可信本地环境使用。Host/Origin 信任围栏不受影响。非回环绑定上的 `--no-auth` 会被拒绝，见 [H12](#h12---no-auth-只接受-loopback-绑定)。
 
-**为什么**：本地或内网可信环境下每次启动都要带 token 的 URL 很不方便。这个开关**只关掉 token 交换**，不是关掉全部访问控制。
+**为什么**：本地或同一物理局域网的可信环境（例如从手机访问）下，每次启动都要带 token 的 URL 很不方便。这个开关**只关掉 token 交换**，不是关掉全部访问控制。
 
-> **残余风险，用之前要清楚。** 开了 `--no-auth`，还在拦人的只剩「绑定在回环」加「Host/Origin 围栏」。谁能把请求送到那个端口、且 Host 头在围栏白名单里，就直接拿到完整 RPC 权限 —— 而 dsh 的 RPC 能执行命令、读写文件。本机独占用没问题；一旦叠加端口转发（Tailscale、`ssh -R`、反向代理）再配 `--trusted-host`，等于把无认证的代码执行入口暴露给能到达那条隧道的任何人。默认不开这个开关就是因为这个。
+> **残余风险，用之前要清楚。** 开了 `--no-auth`，还在拦人的只剩「绑定在回环」加「Host/Origin 围栏」。谁能把请求送到那个端口、且 Host 头在围栏白名单里，就直接拿到完整 RPC 权限 —— 而 dsh 的 RPC 能执行命令、读写文件。本机独占用没问题；一旦叠加端口转发（`ssh -R`、反向代理）再配 `--trusted-host`，等于把无认证的代码执行入口暴露给能到达那条隧道的任何人。默认不开这个开关就是因为这个。
 
 > 结构上这条链是完整的：`HostConnectionService` 的 `browserAuth` 字段类型是接口 `BrowserAuthenticator`，上游给 `BrowserAuth` 加方法并在服务里调用时，`NO_AUTH_BROWSER_AUTH` 少实现就会编译不过 —— 认证面不会被悄悄绕过。全仓库只有 `rpc-host.ts` 消费 `browserAuth`。上游 dsh-v0.2.1-rc.2 加了 `authenticateApi()`、`authorizeConnect()` 与 `secure` 参数，接口与空实现已跟着补齐：无令牌可换，所以 `authorizeConnect` 回 401、`authenticateApi` 回 `undefined`。
 
@@ -322,7 +322,7 @@ git diff <tag> HEAD --name-only -- README.* apps/cli/reference apps/cli/tests ap
 
 **定制内容**：`webserver` 不再在加载时拒绝 `0.0.0.0` / `::`；`isWildcardHost()` 只作信息判断；`getOrigin()` 对通配地址返回 `localhost`；`startup.ts` 里 commander 对 `--host` 通配地址的拒绝也删掉了。
 
-**为什么**：提交没写动机（`feat(web): accept wildcard bind addresses for the Web server`），从本分支的 Tailscale 远程访问用法推断是要在 Tailscale 地址上监听。**这一节动机是推断，不是记录的决定** —— 若动机不是这个，本节要改。Host/Origin 围栏不受影响：非回环来源仍需 `--trusted-host`。
+**为什么**：本分支要在同一物理局域网（`192.168.x.x`）上从别的设备访问，所以未指定地址必须是合法绑定地址。上游的加载时拒绝（提交标题 `feat(web): accept wildcard bind addresses for the Web server` 本身没写动机）因此被去掉；动机由用户在 2026-11-06 确认，Tailscale 用法已停用，相应教程文件已删。Host/Origin 围栏不受影响：非回环来源仍需 `--trusted-host`，而非回环绑定上的 `--no-auth` 由 [H12](#h12---no-auth-只接受-loopback-绑定) 拒绝。
 
 **代码关键名字**
 
@@ -377,7 +377,7 @@ git diff <tag> HEAD --name-only -- README.* apps/cli/reference apps/cli/tests ap
 
 **为什么不在 `packages/client/connection` 里做**：连接包是那条决定的家（它 own 认证与准入），但绑定地址的 loopback 判据 `isLoopbackHost()` 属于 `@deepseek-ai/dsh-host-webserver`，而 `verify-package-dependencies` 拒绝客户端包从 host 包取运行时值（`@deepseek-ai/dsh-host-webserver#isLoopbackHost` 未分类），分类表的新条目要求人工评审 —— 所以只能留在 CLI 这一层。
 
-**已知范围限制**：判据只看本次调用的 `--host`。profile patch 把 bind 钉到 `0.0.0.0`、再用 `--no-auth` 而不带 `--host` 的写法，CLI 看不见 —— 那条路靠文档约定：钉非回环绑定时保持认证开启。合并后别把这条护栏「修」进连接包，除非上游先把 `isLoopbackHost` 分类放行。
+**已知范围限制**：判据只看本次调用的 `--host`。profile patch 把 bind 钉到 `0.0.0.0`、再用 `--no-auth` 而不带 `--host` 的写法，CLI 看不见 —— 那条路靠文档约定：钉非回环绑定时保持认证开启。本分支的实际用法是钉绑定 + 保持配对（`requirePairingForLan` 默认开），启动器的 `--no-auth` 开关与钉过的非回环绑定不要同时用。合并后别把这条护栏「修」进连接包，除非上游先把 `isLoopbackHost` 分类放行。
 
 **代码关键名字**
 
@@ -401,7 +401,7 @@ git diff <tag> HEAD --name-only -- README.* apps/cli/reference apps/cli/tests ap
 
 | 定制 | 文件 | 说明 |
 |---|---|---|
-| **dsh-launcher 图形启动器** | `dsh-launcher/`（14 个文件：`main.py`、`config.py`、`plugin_manager.py`、`proc_utils.py`、`build.py`、`build.bat`、`dsh-launcher.spec`、`requirements.txt`、`.gitignore`、双语 README + `.i18n.yaml`、Tailscale 远程访问教程、`git-remote-tag-guide.md`、`openviking-usage-guide.md`） | PySide6 启动器，可 PyInstaller 打成 exe。功能与 `quick-start.bat` 对齐。**它依赖 dsh CLI 的参数表面** |
+| **dsh-launcher 图形启动器** | `dsh-launcher/`（14 个文件：`main.py`、`config.py`、`plugin_manager.py`、`proc_utils.py`、`build.py`、`build.bat`、`dsh-launcher.spec`、`requirements.txt`、`.gitignore`、双语 README + `.i18n.yaml`、`git-remote-tag-guide.md`、`openviking-usage-guide.md`） | PySide6 启动器，可 PyInstaller 打成 exe。功能与 `quick-start.bat` 对齐。**它依赖 dsh CLI 的参数表面** |
 | **quick-start.bat** | `quick-start.bat` | 批处理菜单启动器，默认端口 3080。与 `dsh-launcher` 是一对（端口常量对齐，且 launcher 会清理它占用的端口） |
 | **.gitignore 追加 `/.kiro`** | `.gitignore` | 忽略 Kiro IDE 的本地配置目录 |
 
@@ -490,7 +490,7 @@ pnpm dsh plugin --help       # 应含 --profile
 
 **review 修的是清单与文档，不是合并本身**：`docs/subsystems/web-server.{md,zh.md}` 的 `type-equiv` 块与源码不一致；`docs/cli-help.{md,zh.md}` 陈旧；proposed note 链到上游已归档的 note；三条翻译对记录未重录（proposed note、`dsh-launcher/README`、`mcp-client/README`）；`mcp-client/src/tools.ts` 两条 lint 错误是 H10 自己引入的（`?.includes(...) === true` 改成直接判断）；两个上游测试断言 persona 文本被 H11 置空后红，断言改成 `''`。
 
-**拍板后落实的六项**（2026-11-06 第二轮）：接受 H6 退役；`--no-auth` 的窄护栏落在 `startup.ts`（[H12](#h12---no-auth-只接受-loopback-绑定)），判据与四处文档措辞一起改，并修掉 `built-bin.e2e.ts` 里那条合并前就红的通配断言；H9 的动机仍待用户确认；`duplication` 用窄豁免注释放行；`docs/openviking-usage-guide.md` 移到 `dsh-launcher/`；`tool-history.ts` 的 `available` 过滤删除并在 `tool-history.spec.ts` 补用例（见 H10）。
+**拍板后落实的六项**（2026-11-06 第二轮）：接受 H6 退役；`--no-auth` 的窄护栏落在 `startup.ts`（[H12](#h12---no-auth-只接受-loopback-绑定)），判据与五处文档措辞一起改，并修掉 `built-bin.e2e.ts` 里那条合并前就红的通配断言；H9 的动机经用户确认是**同一物理局域网访问**，不是 Tailscale（Tailscale 用法已停用，教程文件已删）；`duplication` 用窄豁免注释放行；`docs/openviking-usage-guide.md` 移到 `dsh-launcher/`；`tool-history.ts` 的 `available` 过滤删除并在 `tool-history.spec.ts` 补用例（见 H10）。
 
 **最终验证状态**（本机实测 2026-11-06）：`pnpm install`（上游新增 11 个 devDependencies）、`clean`（360 paths）、typecheck 5/5、lint 0 错误（剩 1 条警告在 `client-ui-cot-translation/src/index.ts`，该文件与 tag 逐字节相同）、build 10/10、duplication 0 克隆、`doc-sync` 43/43（移走 openviking 指南后）、`hygiene` 21/23（两项都是上游自带，见流程节）。定向单测 169 文件 / 3538 通过 / 1 跳过（web-app、connection、modules、tools、agent-loop、locale、mcp-client、webserver、llm、session、sdk-app、sdk-minimal）。全量 `pnpm run test` 中途被中断，已见失败全部落在流程节的本机环境表。**未能验证**：`test:snapshot`（Windows）、`test:e2e`（无 key），以及 H2、H7 的人工实跑项。
 
