@@ -395,6 +395,14 @@ git diff <tag> HEAD --name-only -- README.* apps/cli/reference apps/cli/tests ap
 
 ---
 
+### Profile 层定制（`$DSH_HOME`，仓库外）
+
+不在仓库里，`git diff <tag> HEAD --stat` 看不到它们，合并后要点名核对。它们的风险不来自 git 冲突，而来自上游改掉了它们复制来的东西。
+
+| 定制 | 位置 | 最容易出错的地方 | 验证 |
+|---|---|---|---|
+| **REA 逆向分析模式**（`rea` 预设，由创造模式写出） | `$DSH_HOME/profiles/web/cordis.patch.yml` 的 `preset-rea` 行；MCP 侧是 profile `package.json` 的 `bundles` 里的 `dsh-plugin-rea` 与 `$DSH_HOME/plugins/rea-bundle/` | `preset-rea` 的 `plugins:` 是内置 `standard` 预设清单的**手工副本**：上游改那份清单，副本要逐行跟着迁移，typecheck、lint、`pnpm run test` 全都看不见它。已踩过的坑（dsh-v0.2.2-rc.1 合并后）：副本里的 `@deepseek-ai/dsh-tool-subagent-control/list-agents` 行导出已退役（`4df09d37d5`，见[升级指南](docs/upgrade-guide/v0.2.1-rc.1/subagent-control-tools/guide.md)），这一行让整个预设挂载失败，Web 模式选择器**整张卡片消失**、切过去报预设不可用；同一次改动把 `tool-subagent` 的 `modelSelectionSettings` 改名 `modelSelection` 并新增 `modelDiscovery`，旧键被 schemastery 静默丢弃，子代理选模型能力无声降级。迁移做法：把副本与 `packages/bundle/web-app/presets/standard.patch.yml` 逐行对一遍 | 启动后读预设列表，`rea` 一行**不带** `broken` 字段（挂载失败时 `agentPresets` 给出该字段，选择器就隐藏整张卡片）：`node --import tsx/esm` 启动一次 profile 读 `ctx.get('agentPresets').list()`，或在 Web 设置页看卡片是否正常选中 |
+
 ### 低风险改动
 
 都是新增文件，官方不会碰，不会产生冲突。合并后 `git diff <tag> HEAD --stat` 里看到它们还在就行。
@@ -493,6 +501,8 @@ pnpm dsh plugin --help       # 应含 --profile
 **拍板后落实的六项**（2026-11-06 第二轮）：接受 H6 退役；`--no-auth` 的窄护栏落在 `startup.ts`（[H12](#h12---no-auth-只接受-loopback-绑定)），判据与五处文档措辞一起改，并修掉 `built-bin.e2e.ts` 里那条合并前就红的通配断言；H9 的动机经用户确认是**同一物理局域网访问**，不是 Tailscale（Tailscale 用法已停用，教程文件已删）；`duplication` 用窄豁免注释放行；`docs/openviking-usage-guide.md` 移到 `dsh-launcher/`；`tool-history.ts` 的 `available` 过滤删除并在 `tool-history.spec.ts` 补用例（见 H10）。
 
 **最终验证状态**（本机实测 2026-11-06）：`pnpm install`（上游新增 11 个 devDependencies）、`clean`（360 paths）、typecheck 5/5、lint 0 错误（剩 1 条警告在 `client-ui-cot-translation/src/index.ts`，该文件与 tag 逐字节相同）、build 10/10、duplication 0 克隆、`doc-sync` 43/43（移走 openviking 指南后）、`hygiene` 21/23（两项都是上游自带，见流程节）。定向单测 169 文件 / 3538 通过 / 1 跳过（web-app、connection、modules、tools、agent-loop、locale、mcp-client、webserver、llm、session、sdk-app、sdk-minimal）。全量 `pnpm run test` 中途被中断，已见失败全部落在流程节的本机环境表。**未能验证**：`test:snapshot`（Windows）、`test:e2e`（无 key），以及 H2、H7 的人工实跑项。
+
+**合并遗漏（2026-11-06 发现并修）**：仓库内的定制全部核对过，仓库外的 `preset-rea` 没随上游的 `/list-agents` 退役迁移 —— 那一行让整个 `rea` 预设挂载失败，Web 模式选择器里卡片消失。已按[Profile 层定制](#profile-层定制dsh_home仓库外)迁移，核对结果是预设列表里 `rea` 不带 `broken`。教训：核对范围限定代码这条边界，让 profile 层定制在合并里天然没有对账入口，只能在文档里给它单独一节。
 
 ### dsh-v0.2.1-rc.2（2026-10-21）
 
