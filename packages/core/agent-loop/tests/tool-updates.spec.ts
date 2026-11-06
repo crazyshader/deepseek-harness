@@ -111,4 +111,39 @@ describe('tool update emission', () => {
     ])
     expect(agent.session.requestHeader()?.tools?.map(schema => schema.name)).toEqual(['search'])
   })
+
+  it('withholds a deferred baseline tool until its own addition activates it', async () => {
+    const adapter = new MockAdapter(Array.from({ length: 3 }, () => textResponse('ok')))
+    adapter.toolUpdate = 'in-history'
+    const { ctx, agent } = await harness(adapter)
+    // A large server advertises its whole list from the first request: `core`
+    // is offered normally, `rare` is declared but withheld.
+    let deferRare = true
+    const rare = () => ctx.tools.register(defineContentToolFixture({
+      name: 'rare',
+      description: 'rare tool',
+      parameters: {},
+      ...deferRare ? { deferLoading: true as const } : {},
+      execute: async () => [{ type: 'text', text: 'done' }],
+    }))
+    tool(ctx, 'core')
+    const disposeRare = rare()
+    await send(agent, 'first')
+    expect(adapter.requests[0]?.tools?.map(schema => schema.name)).toEqual(['core'])
+    expect(developerEvents(agent)).toEqual([])
+
+    // Selecting it re-offers the same name without the deferred marker.
+    disposeRare()
+    deferRare = false
+    rare()
+    await send(agent, 'second')
+    expect(developerEvents(agent)[0]?.data.message.content).toEqual([{ type: 'tool-addition', toolName: 'rare' }])
+    // The declaration list carries both; the developer message activates `rare`.
+    expect(adapter.requests[1]?.tools?.map(schema => schema.name).sort()).toEqual(['core', 'rare'])
+
+    await send(agent, 'third')
+    // Activated once, the tool stays available without further updates.
+    expect(developerEvents(agent)).toHaveLength(1)
+    expect(adapter.requests[2]?.tools?.map(schema => schema.name)).toEqual(['core', 'rare'])
+  })
 })

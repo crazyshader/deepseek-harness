@@ -650,9 +650,17 @@ export class ReactLoopAgent implements Agent {
       this.session.append('request/header', { header, reason: 'series' })
     }
     if (baseline !== undefined && headerSeq !== undefined) {
-      const previousNames = new Set(baseline.tools?.map(tool => tool.name))
+      const previous = new Map(baseline.tools?.map(tool => [tool.name, tool]))
       const currentNames = new Set(tools.map(tool => tool.name))
-      const additions = tools.filter(tool => !previousNames.has(tool.name))
+      // A deferred tool joins on the first request that carries it undeflected,
+      // or when its definition is re-offered after being withheld. Without the
+      // second case the name would be declared in a series that already offered
+      // it as deferred, and no update would ever activate it.
+      const additions = tools.filter((tool) => {
+        const before = previous.get(tool.name)
+        if (before === undefined) return true
+        return before.deferLoading === true && tool.deferLoading !== true
+      })
         .map(tool => ({ type: 'tool-addition' as const, toolName: tool.name }))
       const removals = (baseline.tools ?? []).filter(tool => !currentNames.has(tool.name))
         .map(tool => ({ type: 'tool-removal' as const, toolName: tool.name }))

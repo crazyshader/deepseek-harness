@@ -383,7 +383,12 @@ function toolDeclarations(
   mode: ToolUpdate,
   history: ToolHistory,
 ): Map<string, ToolSchema> {
-  const declarations = new Map(history.tools.map(tool => [tool.name, tool]))
+  // A baseline tool declared with `deferLoading` is withheld until a call
+  // selects it. The MCP bridge uses this for servers whose tool list is too
+  // large to spend a prompt on: the name stays declarable, the schema does not.
+  const declarations = new Map(history.tools
+    .filter(tool => tool.deferLoading !== true)
+    .map(tool => [tool.name, tool]))
   for (const update of history.updates) {
     for (const tool of update.additions) {
       if (!declarations.has(tool.name)) {

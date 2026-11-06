@@ -72,6 +72,20 @@ export interface StdioConfig {
   failOnStartupError: boolean
   /** Maximum UTF-8 bytes of attributed server instructions (default 32768). */
   maxInstructionBytes?: number
+  /**
+   * Bytes of whole leading sentences to keep when the instructions exceed
+   * `maxInstructionBytes`. Zero keeps the block intact and fails the attempt.
+   * Instruction text is usage first and recovery boilerplate last, so a host
+   * with a tight prompt budget keeps the head and moves the tail elsewhere.
+   */
+  instructionByteLimit?: number
+  /**
+   * Upstream tool names to register as deferred: the model may select them, but
+   * their schemas are omitted from the baseline declaration until a call names
+   * one. A server with hundreds of tools otherwise spends most of its prompt on
+   * definitions nobody reads. Requires a route that supports tool updates.
+   */
+  deferTools?: string[]
   /** Automatic reconnect policy after a lost connection; omission uses the defaults. */
   reconnect?: ReconnectConfig
 }
@@ -96,6 +110,13 @@ export interface StreamableHttpConfig {
   failOnStartupError: boolean
   /** Maximum UTF-8 bytes of attributed server instructions (default 32768). */
   maxInstructionBytes?: number
+  /** Leading whole-sentence bytes to keep past that limit; see the stdio field. */
+  instructionByteLimit?: number
+  /**
+   * Upstream tool names to register as deferred on a Streamable HTTP server;
+   * see the stdio field of the same name.
+   */
+  deferTools?: string[]
   /** Automatic reconnect policy after a lost connection; omission uses the defaults. */
   reconnect?: ReconnectConfig
 }
@@ -127,6 +148,8 @@ export const Config = z.union([
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
+    instructionByteLimit: z.number().step(1).min(0).default(0),
+    deferTools: z.array(String).default([]),
     reconnect: Reconnect,
   }),
   z.object({
@@ -137,6 +160,8 @@ export const Config = z.union([
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
+    instructionByteLimit: z.number().step(1).min(0).default(0),
+    deferTools: z.array(String).default([]),
     reconnect: Reconnect,
   }),
 ]) as z<ConfigInput, Config>

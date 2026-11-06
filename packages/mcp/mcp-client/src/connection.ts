@@ -131,6 +131,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     registrationFailure: 'contain',
     serverName: config.serverName,
     toolCallTimeoutMs: config.toolCallTimeoutMs,
+    deferredTools: config.deferTools ?? [],
   }
   // The initial sync uses 'throw' when failOnStartupError is configured, so
   // a registration conflict propagates to the startup-await path. Re-syncs
@@ -141,6 +142,14 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
 
   let disposed = false
   const maxInstructionBytes = config.maxInstructionBytes ?? DEFAULT_MAX_INSTRUCTION_BYTES
+  /**
+   * Bytes of attributed instructions kept from the front when the server's text
+   * is longer than {@link maxInstructionBytes}. A long instruction block is
+   * usage first and recovery boilerplate last, so an operator with a tight
+   * prompt budget keeps the head and moves the tail somewhere else. Zero keeps
+   * the whole block and turns the overflow back into a failed attempt.
+   */
+  const instructionByteLimit = config.instructionByteLimit ?? 0
   let serverInstructions = ''
   /** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
   let client: Client | undefined
@@ -316,9 +325,22 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         return
       }
       const serverText = generation.getInstructions()?.trimEnd() ?? ''
-      instructions = serverText ? `### MCP server: ${config.serverName}\n\n${serverText}` : ''
+      const attributed = (text: string): string => text ? `### MCP server: ${config.serverName}\n\n${text}` : ''
+      instructions = attributed(serverText)
       if (Buffer.byteLength(instructions) > maxInstructionBytes) {
-        throw new Error(`${label}: server instructions exceed maxInstructionBytes (${maxInstructionBytes})`)
+        const kept = instructionByteLimit > 0 ? trimInstructions(serverText, instructionByteLimit) : ''
+        // Nothing trimmed means no whole sentence ends before the limit: that is
+        // an overflow, not a shorter instruction block.
+        if (kept === '' || kept === serverText) {
+          throw new Error(`${label}: server instructions exceed maxInstructionBytes (${maxInstructionBytes})`)
+        }
+        // Whole sentences only: a cut mid-sentence would leave an instruction
+        // fragment the model reads as complete.
+        instructions = attributed(kept)
+        if (Buffer.byteLength(instructions) > maxInstructionBytes) {
+          throw new Error(`${label}: server instructions exceed maxInstructionBytes (${maxInstructionBytes}) even after instructionByteLimit (${instructionByteLimit})`)
+        }
+        ctx.logger.info(`${label}: kept the first ${instructionByteLimit} bytes of ${Buffer.byteLength(serverText)} server instruction bytes`)
       }
       await enqueueSync(generation, startup ? startupOpts : opts)
     } catch (error) {
@@ -406,4 +428,26 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       disposers = new Map()
     },
   }
+}
+
+/**
+ * Keep the leading sentences of a server instruction block within `limit` bytes.
+ *
+ * A long block is ordered usage first, recovery boilerplate last, so the head is
+ * the part worth spending a prompt on. The cut ends at a sentence boundary and
+ * never exceeds the limit; a first sentence longer than the limit keeps nothing
+ * (the caller then reports the overflow instead of sending a fragment).
+ * @param text - the server's trimmed instruction block.
+ * @param limit - maximum UTF-8 bytes to keep.
+ * @returns the longest whole-sentence prefix within the limit.
+ */
+function trimInstructions(text: string, limit: number): string {
+  const sentences = text.match(/[^.!?]*(?:[.!?]+(?=\s|$)|$)/g) ?? []
+  let kept = ''
+  for (const sentence of sentences) {
+    const next = kept + sentence
+    if (Buffer.byteLength(next.trimEnd()) > limit) break
+    kept = next
+  }
+  return kept.trimEnd()
 }

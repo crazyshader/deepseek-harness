@@ -30,6 +30,13 @@ export interface ToolBridgeOptions {
   registrationFailure: 'contain' | 'throw'
   serverName: string
   toolCallTimeoutMs: number
+  /**
+   * Tools the model may discover but is not offered until a call selects them.
+   * Each still has to be listed by the server; the host keeps the registration
+   * and drops only the up-front schema, which is what an MCP server with
+   * hundreds of tools spends most of its prompt on.
+   */
+  deferredTools: readonly string[]
 }
 
 /** State for one sync generation: the current set of disposers keyed by public name. */
@@ -135,6 +142,7 @@ export async function syncTools(
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
       taskRequired: tool.execution?.taskSupport === 'required',
+      deferred: opts.deferredTools?.includes(tool.name) === true,
       call: (args, execution) => client.callTool(
         { name: tool.name, arguments: args },
         { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
@@ -206,6 +214,8 @@ export interface McpToolDefinitionOptions {
   outputSchema?: unknown
   /** Whether the upstream tool requires the unsupported task execution extension. */
   taskRequired?: boolean
+  /** Omit the definition from the baseline schemas until a call selects this tool. */
+  deferred?: boolean
   /**
    * Obtain one raw MCP result from the provider.
    * @param args - model arguments admitted by the ToolRuntime.
@@ -232,6 +242,7 @@ export function createMcpToolDefinition(
     name,
     description,
     parameters: inputSchema,
+    ...options.deferred === true ? { deferLoading: true as const } : {},
     output: createOutput(rawName, supportedOutputSchema(options.outputSchema)),
     execute: createExecutor(ctx, options, projections),
     projectContent(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>) {
